@@ -1,10 +1,14 @@
 import json
 import sqlite3
 import numpy as np
+import os
 
 class DatabaseManager:
     def __init__(self, db_path="data/logs/attendance.db"):
         self.db_path = db_path
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
         self.init_db()
 
     def get_connection(self):

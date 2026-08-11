@@ -1,0 +1,51 @@
+ 
+Requirement already satisfied: pip in .\.venv\Lib\site-packages (26.2.1)
+Requirement already satisfied: cmake in .\.venv\Lib\site-packages (4.4.2)
+Requirement already satisfied: setuptools==81.0.0 in .\.venv\Lib\site-packages (81.0.0)
+Requirement already satisfied: numpy in .\.venv\Lib\site-packages (2.5.2)
+Requirement already satisfied: opencv-python in .\.venv\Lib\site-packages (5.0.0.93)
+Requirement already satisfied: flask in .\.venv\Lib\site-packages (3.1.3)
+Requirement already satisfied: bcrypt in .\.venv\Lib\site-packages (5.0.0)
+Requirement already satisfied: blinker>=1.9.0 in .\.venv\Lib\site-packages (from flask) (1.9.0)
+Requirement already satisfied: click>=8.1.3 in .\.venv\Lib\site-packages (from flask) (8.4.2)
+Requirement already satisfied: itsdangerous>=2.2.0 in .\.venv\Lib\site-packages (from flask) (2.2.0)
+Requirement already satisfied: jinja2>=3.1.2 in .\.venv\Lib\site-packages (from flask) (3.1.6)
+Requirement already satisfied: markupsafe>=2.1.1 in .\.venv\Lib\site-packages (from flask) (3.0.3)
+Requirement already satisfied: werkzeug>=3.1.0 in .\.venv\Lib\site-packages (from flask) (3.1.8)
+Requirement already satisfied: colorama in .\.venv\Lib\site-packages (from click>=8.1.3->flask) (0.4.6)
+Collecting dlib==19.24.99
+  Downloading dlib-19.24.99-cp312-cp312-win_amd64.whl (2.9 MB)
+     ---------------------------------------- 2.9/2.9 MB 7.6 MB/s  0:00:00
+Installing collected packages: dlib
+  Attempting uninstall: dlib
+    Found existing installation: dlib 20.0.1
+    Uninstalling dlib-20.0.1:
+      Successfully uninstalled dlib-20.0.1
+Successfully installed dlib-19.24.99
+Requirement already satisfied: face_recognition in .\.venv\Lib\site-packages (1.3.0)
+Requirement already satisfied: face-recognition-models>=0.3.0 in .\.venv\Lib\site-packages (from face_recognition) (0.3.0)
+Requirement already satisfied: Click>=6.0 in .\.venv\Lib\site-packages (from face_recognition) (8.4.2)
+Requirement already satisfied: dlib>=19.7 in .\.venv\Lib\site-packages (from face_recognition) (19.24.99)
+Requirement already satisfied: numpy in .\.venv\Lib\site-packages (from face_recognition) (2.5.2)
+Requirement already satisfied: Pillow in .\.venv\Lib\site-packages (from face_recognition) (12.3.0)
+Requirement already satisfied: colorama in .\.venv\Lib\site-packages (from Click>=6.0->face_recognition) (0.4.6)
+Collecting https://github.com/ageitgey/face_recognition_models/archive/master.zip
+  Using cached master.zip
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: face_recognition_models
+  Building wheel for face_recognition_models (pyproject.toml): started
+  Building wheel for face_recognition_models (pyproject.toml): finished with status 'done'
+  Created wheel for face_recognition_models: filename=face_recognition_models-0.3.0-py2.py3-none-any.whl size=100566259 sha256=d0e1aa4b9db6d8c3e2e3c7b7dffc87c7f3af47f8fb4682ceb8654afbc521fc5e
+  Stored in directory: C:\Users\sutha\AppData\Local\Temp\pip-ephem-wheel-cache-u2bgtmb6\wheels\47\bd\9b\13d17c87f44f6719027f17fd9978f2a24cb23cfbb77694dcb8
+Successfully built face_recognition_models
+Installing collected packages: face_recognition_models
+  Attempting uninstall: face_recognition_models
+    Found existing installation: face_recognition_models 0.3.0
+    Uninstalling face_recognition_models-0.3.0:
+      Successfully uninstalled face_recognition_models-0.3.0
+Successfully installed face_recognition_models-0.3.0
