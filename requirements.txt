@@ -1,6 +1,6 @@
 cmake
-numpy
-opencv-python
+numpy==1.26.4
+opencv-python==4.9.0.80
 flask
 bcrypt
 face_recognition

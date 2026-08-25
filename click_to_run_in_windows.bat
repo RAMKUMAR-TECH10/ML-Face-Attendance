@@ -68,7 +68,7 @@ if errorlevel 1 (
 
 :: PHASE 3: WEB & DATABASE (40% - 70%)
 echo [70%%] Syncing Web and Database Modules...
-"%VENV_DIR%\Scripts\python.exe" -m pip install numpy opencv-python flask bcrypt >> "%LOG_FILE%" 2>&1
+"%VENV_DIR%\Scripts\python.exe" -m pip install numpy==1.26.4 opencv-python==4.9.0.80 flask bcrypt >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     color 0c
     echo [!] CRITICAL ERROR: Failed to install modules [numpy/opencv/flask/bcrypt].
