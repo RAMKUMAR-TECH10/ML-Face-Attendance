@@ -134,7 +134,7 @@ class DatabaseManager:
                     print(f"[DB WARNING] Student '{name}' (id={sid}) has corrupt face descriptor, skipping.")
                     continue
                 # Skip students with empty or wrong-dimension descriptors
-                if descriptor.ndim != 1 or descriptor.shape[0] != 128:
+                if descriptor.ndim != 1 or descriptor.shape[0] not in (128, 512):
                     print(f"[DB WARNING] Student '{name}' (id={sid}) has invalid descriptor shape {descriptor.shape}, skipping.")
                     continue
                 results.append({

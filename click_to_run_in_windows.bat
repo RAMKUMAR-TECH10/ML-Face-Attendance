@@ -5,6 +5,8 @@ color 0b
 
 set "LOG_FILE=%~dp0setup_log.txt"
 set "VENV_DIR=%~dp0.venv"
+set "PIP_TIMEOUT=120"
+set "MAX_RETRIES=3"
 
 :: Find python executable
 where python >nul 2>&1
@@ -13,13 +15,21 @@ if %errorlevel% equ 0 (
     goto :python_ok
 )
 
-:: Try default install locations as fallback
-if exist "C:\Users\sutha\AppData\Local\Programs\Python\Python312\python.exe" (
-    set "PYTHON_PATH=C:\Users\sutha\AppData\Local\Programs\Python\Python312\python.exe"
+:: Try common install locations
+if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
+    set "PYTHON_PATH=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
     goto :python_ok
 )
-if exist "C:\Users\sutha\AppData\Local\Programs\Python\Python313\python.exe" (
-    set "PYTHON_PATH=C:\Users\sutha\AppData\Local\Programs\Python\Python313\python.exe"
+if exist "%LOCALAPPDATA%\Programs\Python\Python313\python.exe" (
+    set "PYTHON_PATH=%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
+    goto :python_ok
+)
+if exist "C:\Python312\python.exe" (
+    set "PYTHON_PATH=C:\Python312\python.exe"
+    goto :python_ok
+)
+if exist "C:\Python313\python.exe" (
+    set "PYTHON_PATH=C:\Python313\python.exe"
     goto :python_ok
 )
 
@@ -55,12 +65,12 @@ echo [OK] Environment Created.
 
 :phase2
 :: PHASE 2: CORE TOOLS (20% - 40%)
-echo [40%%] Installing Build Tools (CMake / setuptools)...
+echo [40%%] Installing Build Tools...
 "%VENV_DIR%\Scripts\python.exe" -m pip install --upgrade pip >> "%LOG_FILE%" 2>&1
-"%VENV_DIR%\Scripts\python.exe" -m pip install cmake setuptools==81.0.0 >> "%LOG_FILE%" 2>&1
+"%VENV_DIR%\Scripts\python.exe" -m pip install cmake setuptools >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     color 0c
-    echo [!] CRITICAL ERROR: Failed to install build tools [CMake / setuptools].
+    echo [!] CRITICAL ERROR: Failed to install build tools.
     echo Check setup_log.txt for details.
     pause
     exit /b
@@ -68,58 +78,42 @@ if errorlevel 1 (
 
 :: PHASE 3: WEB & DATABASE (40% - 70%)
 echo [70%%] Syncing Web and Database Modules...
-"%VENV_DIR%\Scripts\python.exe" -m pip install numpy==1.26.4 opencv-python==4.9.0.80 flask bcrypt >> "%LOG_FILE%" 2>&1
+"%VENV_DIR%\Scripts\python.exe" -m pip install --timeout %PIP_TIMEOUT% --retries %MAX_RETRIES% --prefer-binary numpy opencv-python flask bcrypt >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     color 0c
-    echo [!] CRITICAL ERROR: Failed to install modules [numpy/opencv/flask/bcrypt].
+    echo [!] CRITICAL ERROR: Failed to install web/database modules.
     echo Check setup_log.txt for details.
     pause
     exit /b
 )
 
-:: PHASE 4: AI ENGINE (70% - 100%)
-echo [90%%] Finalizing AI Core (face_recognition)...
-echo       - NOTE: This part is heavy, please wait...
-
-:: Detect Python version of venv to fetch precompiled dlib wheel (safely handle spaces in path)
-"%VENV_DIR%\Scripts\python.exe" -V > "%VENV_DIR%\pyver.txt" 2>&1
-for /f "usebackq tokens=2 delims= " %%i in ("%VENV_DIR%\pyver.txt") do set "PY_FULL_VERSION=%%i"
-for /f "tokens=2 delims=." %%b in ("%PY_FULL_VERSION%") do set "PY_MINOR=%%b"
-del "%VENV_DIR%\pyver.txt"
-
-echo       - Detected Python 3.!PY_MINOR! in Virtual Environment.
-echo       - Installing pre-compiled dlib binaries for Windows...
-
-set "DLIB_WHL="
-if "!PY_MINOR!"=="10" set "DLIB_WHL=https://github.com/z-mahmud22/Dlib_Windows_Python3.x/raw/main/dlib-19.22.99-cp310-cp310-win_amd64.whl"
-if "!PY_MINOR!"=="11" set "DLIB_WHL=https://github.com/z-mahmud22/Dlib_Windows_Python3.x/raw/main/dlib-19.24.1-cp311-cp311-win_amd64.whl"
-if "!PY_MINOR!"=="12" set "DLIB_WHL=https://github.com/z-mahmud22/Dlib_Windows_Python3.x/raw/main/dlib-19.24.99-cp312-cp312-win_amd64.whl"
-if "!PY_MINOR!"=="13" set "DLIB_WHL=https://github.com/z-mahmud22/Dlib_Windows_Python3.x/releases/download/v1/dlib-20.0.99-cp313-cp313-win_amd64.whl"
-if not defined DLIB_WHL set "DLIB_WHL=dlib"
-
-"%VENV_DIR%\Scripts\python.exe" -m pip install !DLIB_WHL! >> "%LOG_FILE%" 2>&1
+:: PHASE 4: AI ENGINE - FACENET (70% - 100%)
+echo [90%%] Finalizing AI Core (FaceNet + MTCNN)...
+echo       - Installing PyTorch (CPU-optimized)...
+"%VENV_DIR%\Scripts\python.exe" -m pip install --timeout %PIP_TIMEOUT% --retries %MAX_RETRIES% --prefer-binary torch torchvision --index-url https://download.pytorch.org/whl/cpu >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     color 0c
-    echo [!] CRITICAL ERROR: Failed to install dlib wheel for Python 3.!PY_MINOR!.
+    echo [!] CRITICAL ERROR: Failed to install PyTorch.
     echo Check setup_log.txt for details.
     pause
     exit /b
 )
 
-"%VENV_DIR%\Scripts\python.exe" -m pip install face_recognition >> "%LOG_FILE%" 2>&1
+echo       - Installing FaceNet-PyTorch...
+"%VENV_DIR%\Scripts\python.exe" -m pip install --timeout %PIP_TIMEOUT% --retries %MAX_RETRIES% --prefer-binary facenet-pytorch --no-deps >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     color 0c
-    echo [!] CRITICAL ERROR: Failed to install face_recognition.
+    echo [!] CRITICAL ERROR: Failed to install facenet-pytorch.
     echo Check setup_log.txt for details.
     pause
     exit /b
 )
 
-:: Reinstalling models if necessary
-"%VENV_DIR%\Scripts\python.exe" -m pip install --force-reinstall https://github.com/ageitgey/face_recognition_models/archive/master.zip >> "%LOG_FILE%" 2>&1
+echo       - Installing supporting libraries...
+"%VENV_DIR%\Scripts\python.exe" -m pip install --timeout %PIP_TIMEOUT% --retries %MAX_RETRIES% --prefer-binary requests tqdm scipy scikit-learn >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     color 0c
-    echo [!] CRITICAL ERROR: Failed to install face_recognition_models database.
+    echo [!] CRITICAL ERROR: Failed to install supporting libraries.
     echo Check setup_log.txt for details.
     pause
     exit /b

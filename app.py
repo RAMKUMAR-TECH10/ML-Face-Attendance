@@ -13,7 +13,6 @@ import os
 import time
 from database_manager import DatabaseManager
 from camera_module import CameraModule
-from face_detector import FaceDetector
 from recognition_engine import RecognitionEngine
 from attendance_manager import AttendanceManager
 
@@ -21,7 +20,7 @@ from attendance_manager import AttendanceManager
 app = Flask(__name__)
 db_manager = DatabaseManager()
 camera = CameraModule()
-engine = RecognitionEngine(threshold=0.6)
+engine = RecognitionEngine(threshold=0.8)
 attendance_mgr = AttendanceManager(db_manager, cooldown_minutes=240)
 
 # Thread-safe camera access
@@ -116,7 +115,7 @@ def ai_brain_worker():
         try:
             # Scale down for fast AI processing
             small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-            face_locations = engine.get_locations(small_frame, model='hog')
+            face_locations = engine.get_locations(small_frame)
 
             if len(face_locations) == 0:
                 with live_status_lock:
@@ -247,7 +246,7 @@ def gen_registration_preview():
                 # Run face detection on half-res for speed
                 small = cv2.resize(display, (dw // 2, dh // 2))
                 sh, sw = small.shape[:2]
-                face_locations = engine.get_locations(small, model='hog')
+                face_locations = engine.get_locations(small)
 
                 cached_status = 'NO_FACE'
                 cached_msg = 'NO FACE DETECTED'
@@ -342,7 +341,7 @@ def api_process_frame():
             
         # AI Processing (reuse logic from brain worker but synchronous for this request)
         small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5) # 0.5 is fine for 480p->240p
-        face_locations = engine.get_locations(small_frame, model='hog')
+        face_locations = engine.get_locations(small_frame)
         
         if len(face_locations) == 0:
             with live_status_lock:
@@ -615,7 +614,7 @@ def api_add_student():
             
         # 2. Biometric Anti-Duplicate Check
         if known_encodings:
-            index, distance = engine.compare_faces(known_encodings, encoding)
+            index, distance = engine.compare_faces(known_encodings, encoding, threshold=0.6)
             if index is not None:
                 existing_name = known_names[index]
                 return jsonify({'error': f'Biometric Match Found: You are already registered as {existing_name}.'}), 400
@@ -663,8 +662,8 @@ def api_upload_student():
                 scale = max_dim / max(h, w)
                 img = cv2.resize(img, (int(w * scale), int(h * scale)))
                 
-            # Detect face using HOG model (fast, works well for clear photos)
-            face_locations = engine.get_locations(img, model='hog')
+            # Detect face using MTCNN model (accurate, aligned detection)
+            face_locations = engine.get_locations(img)
             if not face_locations:
                 return jsonify({'error': 'No face found in image. Ensure face is visible and clear.'}), 400
             if len(face_locations) > 1:
@@ -696,7 +695,7 @@ def api_upload_student():
             
         # 2. Biometric Anti-Duplicate Check
         if known_encodings:
-            index, distance = engine.compare_faces(known_encodings, encoding)
+            index, distance = engine.compare_faces(known_encodings, encoding, threshold=0.6)
             if index is not None:
                 existing_name = known_names[index]
                 return jsonify({'error': f'Biometric Match Found: You are already registered as {existing_name}.'}), 400
@@ -762,7 +761,7 @@ def api_student_snapshot():
         
         # Detect face
         try:
-            face_locations = engine.get_locations(frame, model='hog')
+            face_locations = engine.get_locations(frame)
         except Exception as e:
             print(f"[SNAPSHOT ERROR] Face detection failed: {e}")
             return jsonify({'error': f'Face detection failed: {str(e)}'}), 500
@@ -831,7 +830,7 @@ def api_update_student(student_id):
             img_arr = np.frombuffer(img_bytes, np.uint8)
             img = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
             if img is not None:
-                face_locations = engine.get_locations(img, model='hog')
+                face_locations = engine.get_locations(img)
                 if face_locations:
                     encodings = engine.get_encodings(img, face_locations)
                     if encodings:

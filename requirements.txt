@@ -1,6 +1,12 @@
 cmake
-numpy==1.26.4
-opencv-python==4.9.0.80
+numpy
+opencv-python
 flask
 bcrypt
-face_recognition
+torch
+torchvision
+facenet-pytorch
+requests
+tqdm
+scipy
+scikit-learn
