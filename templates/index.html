@@ -108,7 +108,22 @@
             </div>
         </div>
         <div class="p-4 md:p-8 max-w-7xl mx-auto">
-            
+
+            <!-- Global Year Selector -->
+            <div id="year-filter-bar" class="bg-white dark:bg-dark-card rounded-xl shadow-sm border border-gray-100 dark:border-dark-border px-4 py-3 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sticky top-14 md:top-0 z-10">
+                <div class="flex items-center gap-3">
+                    <i class="fa-solid fa-layer-group text-brand-500"></i>
+                    <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">Year View</span>
+                </div>
+                <select id="global-year-filter" class="w-full sm:w-auto bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-brand-500 outline-none text-gray-700 dark:text-gray-200">
+                    <option value="">All Years</option>
+                    <option value="1st">1st Year</option>
+                    <option value="2nd">2nd Year</option>
+                    <option value="3rd">3rd Year</option>
+                    <option value="4th">4th Year</option>
+                </select>
+            </div>
+
             <!-- Dashboard View -->
             <div id="view-dashboard" class="view-section active">
                 <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-8">
@@ -213,7 +228,7 @@
                             <tbody class="divide-y divide-gray-100 dark:divide-dark-border text-sm">
                                 <!-- Student Rows dynamically injected here -->
                                 <tr>
-                                    <td colspan="6" class="px-6 py-8 text-center text-sm text-gray-500">
+                                    <td colspan="7" class="px-6 py-8 text-center text-sm text-gray-500">
                                         <i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Loading students...
                                     </td>
                                 </tr>
@@ -517,6 +532,7 @@
         // Global UI State
         let cameraRunning = false;
         let heartbeatInterval = null;
+        let selectedYear = '';
         const htmlEl = document.documentElement;
 
         // Auto-check local storage
@@ -713,14 +729,14 @@
         }
 
         function updateStats() {
-            fetch('/api/stats')
+            const url = '/api/stats' + (selectedYear ? `?year=${encodeURIComponent(selectedYear)}` : '');
+            fetch(url)
                 .then(r => r.json())
                 .then(data => {
                     const total = data.total || 0;
                     const present = data.present || 0;
                     const absent = data.absent || 0;
-                    // Mocking 'late' if the API doesn't provide it yet, based on random or logic
-                    const late = Math.floor(total * 0.05); 
+                    const late = data.late || 0;
 
                     document.getElementById('dash-total').innerText = total;
                     document.getElementById('dash-present').innerText = present;
@@ -736,8 +752,24 @@
                 .catch(e => console.error("Stats API Error:", e));
         }
 
+        function updateWeeklyChart() {
+            const url = '/api/stats/weekly' + (selectedYear ? `?year=${encodeURIComponent(selectedYear)}` : '');
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    if(!weeklyChart) return;
+                    weeklyChart.data.labels = data.labels || [];
+                    weeklyChart.data.datasets[0].data = data.present || [];
+                    weeklyChart.data.datasets[1].data = data.absent || [];
+                    weeklyChart.data.datasets[2].data = data.late || [];
+                    weeklyChart.update();
+                })
+                .catch(e => console.error("Weekly Stats API Error:", e));
+        }
+
         function fetchRecentList() {
-            fetch('/api/recent')
+            const url = '/api/recent' + (selectedYear ? `?year=${encodeURIComponent(selectedYear)}` : '');
+            fetch(url)
                 .then(r => r.json())
                 .then(data => {
                     const list = document.getElementById('scanner-recent-list');
@@ -806,7 +838,8 @@
 
         // 6. Fetch Students list
         function loadStudents() {
-            fetch('/api/students')
+            const url = '/api/students' + (selectedYear ? `?year=${encodeURIComponent(selectedYear)}` : '');
+            fetch(url)
                 .then(r => r.json())
                 .then(data => {
                     const tbody = document.querySelector('#view-students tbody');
@@ -816,7 +849,7 @@
                     attendGrid.innerHTML = '';
 
                     if(data.length === 0) {
-                        tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-sm text-gray-500">No students found.</td></tr>`;
+                        tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-8 text-center text-sm text-gray-500">No students found.</td></tr>`;
                         attendGrid.innerHTML = `<div class="col-span-full text-center text-gray-500 py-8">No students available for attendance.</div>`;
                         return;
                     }
@@ -1054,8 +1087,25 @@
         document.addEventListener('DOMContentLoaded', () => {
             initCharts();
             updateStats();
+            updateWeeklyChart();
             fetchRecentList();
             loadStudents();
+
+            // Global Year Selector wiring
+            const globalYearFilter = document.getElementById('global-year-filter');
+            const reportYearSelect = document.getElementById('report-year');
+            globalYearFilter.addEventListener('change', () => {
+                selectedYear = globalYearFilter.value;
+                reportYearSelect.value = selectedYear;
+                updateStats();
+                updateWeeklyChart();
+                loadStudents();
+                fetchRecentList();
+            });
+            reportYearSelect.addEventListener('change', () => {
+                globalYearFilter.value = reportYearSelect.value;
+                globalYearFilter.dispatchEvent(new Event('change'));
+            });
 
             // Set default report dates (today)
             const today = new Date().toISOString().split('T')[0];

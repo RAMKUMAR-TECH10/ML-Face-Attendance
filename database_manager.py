@@ -115,10 +115,13 @@ class DatabaseManager:
             conn.commit()
             return cursor.rowcount > 0
 
-    def get_all_students(self):
+    def get_all_students(self, year=None):
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, name, rollno, dept, year, email, contact, faceDescriptor FROM students")
+            if year:
+                cursor.execute("SELECT id, name, rollno, dept, year, email, contact, faceDescriptor FROM students WHERE year = ?", (year,))
+            else:
+                cursor.execute("SELECT id, name, rollno, dept, year, email, contact, faceDescriptor FROM students")
             rows = cursor.fetchall()
             
             results = []

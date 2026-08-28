@@ -11,6 +11,7 @@ import threading
 import uuid
 import os
 import time
+from datetime import datetime, timedelta
 from fpdf import FPDF
 from database_manager import DatabaseManager
 from camera_module import CameraModule
@@ -546,45 +547,135 @@ def export_pdf():
 def api_recent():
     from_date = request.args.get('from_date')
     to_date = request.args.get('to_date')
-    
+    year = request.args.get('year')
+
     with db_manager.get_connection() as conn:
         cursor = conn.cursor()
-        query = "SELECT timestamp, student_name, status FROM attendance_log"
-        conditions = []
-        params = []
-        
+        if year:
+            query = '''
+                SELECT al.timestamp, al.student_name, al.status
+                FROM attendance_log al
+                JOIN students s ON al.student_name = s.name
+            '''
+            conditions = ["s.year = ?"]
+            params = [year]
+            prefix = "al."
+        else:
+            query = "SELECT timestamp, student_name, status FROM attendance_log"
+            conditions = []
+            params = []
+            prefix = ""
+
         if from_date:
-            conditions.append("date(timestamp) >= ?")
+            conditions.append(f"date({prefix}timestamp) >= ?")
             params.append(from_date)
         if to_date:
-            conditions.append("date(timestamp) <= ?")
+            conditions.append(f"date({prefix}timestamp) <= ?")
             params.append(to_date)
-        
+
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         query += " ORDER BY timestamp DESC LIMIT 50"
-        
+
         cursor.execute(query, params)
         records = cursor.fetchall()
     return jsonify([{'timestamp': r[0], 'student_name': r[1], 'status': r[2]} for r in records])
 
 @app.route('/api/stats')
 def api_stats():
+    year = request.args.get('year')
+
     with db_manager.get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM students")
+        if year:
+            cursor.execute("SELECT COUNT(*) FROM students WHERE year = ?", (year,))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM students")
         total = cursor.fetchone()[0]
-        
-        # Determine the start of today to query attendance efficiently
-        cursor.execute("SELECT COUNT(DISTINCT student_name) FROM attendance_log WHERE date(timestamp) = date('now')")
-        present = cursor.fetchone()[0]
-        
-    absent = total - present
-    return jsonify({'total': total, 'present': present, 'absent': absent})
+
+        if year:
+            cursor.execute("SELECT name FROM students WHERE year = ?", (year,))
+        else:
+            cursor.execute("SELECT name FROM students")
+        year_names = set(r[0] for r in cursor.fetchall())
+
+        # Most recent status per student for today
+        cursor.execute('''
+            SELECT student_name, status FROM attendance_log
+            WHERE date(timestamp) = date('now')
+            ORDER BY timestamp DESC
+        ''')
+        today_status_map = {}
+        for name, status in cursor.fetchall():
+            if name not in today_status_map:
+                today_status_map[name] = status
+
+    present = 0
+    late = 0
+    for name, status in today_status_map.items():
+        if name not in year_names:
+            continue
+        if status == 'Late':
+            late += 1
+        elif status == 'Present':
+            present += 1
+
+    absent = max(total - present - late, 0)
+    return jsonify({'total': total, 'present': present, 'absent': absent, 'late': late})
+
+@app.route('/api/stats/weekly')
+def api_stats_weekly():
+    year = request.args.get('year')
+
+    with db_manager.get_connection() as conn:
+        cursor = conn.cursor()
+        if year:
+            cursor.execute("SELECT COUNT(*) FROM students WHERE year = ?", (year,))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM students")
+        total = cursor.fetchone()[0]
+
+        if year:
+            cursor.execute("SELECT name FROM students WHERE year = ?", (year,))
+        else:
+            cursor.execute("SELECT name FROM students")
+        student_names = set(r[0] for r in cursor.fetchall())
+
+        cursor.execute('''
+            SELECT date(timestamp), student_name, status
+            FROM attendance_log
+            WHERE date(timestamp) >= date('now', '-6 days')
+            ORDER BY timestamp DESC
+        ''')
+        rows = cursor.fetchall()
+
+    # Latest status per student per day
+    per_day = {}
+    for day, sname, status in rows:
+        if sname not in student_names:
+            continue
+        per_day.setdefault(day, {})
+        if sname not in per_day[day]:
+            per_day[day][sname] = status
+
+    today = datetime.now().date()
+    labels, present, absent, late = [], [], [], []
+    for i in range(6, -1, -1):
+        day = today - timedelta(days=i)
+        day_map = per_day.get(day.isoformat(), {})
+        p = sum(1 for st in day_map.values() if st == 'Present')
+        l = sum(1 for st in day_map.values() if st == 'Late')
+        labels.append(day.strftime('%a %m/%d'))
+        present.append(p)
+        late.append(l)
+        absent.append(max(total - p - l, 0))
+
+    return jsonify({'labels': labels, 'present': present, 'absent': absent, 'late': late})
 
 @app.route('/api/students')
 def api_students():
-    students_list = db_manager.get_all_students()
+    year = request.args.get('year')
+    students_list = db_manager.get_all_students(year)
     
     # Get today's attendance status in one query
     # If a student is marked multiple times, get their most recent status for today
