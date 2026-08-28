@@ -168,9 +168,9 @@ def gen_frames():
     if not camera.open():
         return
 
-    # Start AI worker when scanner starts
-    ai_worker_active.set()
-    threading.Thread(target=ai_brain_worker, daemon=True).start()
+    # Note: the AI background worker is started ONCE at module init (see below)
+    # and runs for the lifetime of the process, so we must not spawn a new
+    # thread per video_feed request (that races multiple workers over the frame buffer).
 
     AI_INTERVAL = 5 # Frequency of frame sharing (every 5th frame)
     frame_count = 0
@@ -414,12 +414,15 @@ def api_camera_heartbeat():
 
 @app.route('/api/camera/stop_scanner', methods=['POST'])
 def api_stop_scanner():
-    """Instantly stops the scanner camera feed and background AI thread."""
+    """Instantly stops the scanner camera feed.
+
+    Note: the singleton AI background worker is NOT stopped here — it stays
+    alive for the process lifetime and simply idles when no frames arrive.
+    """
     camera_active.clear()
-    ai_worker_active.clear()
     with camera_lock:
         camera.release()
-    print("[STOP] Scanner hardware and AI thread released immediately.")
+    print("[STOP] Scanner hardware released immediately.")
     return jsonify({'stopped': True})
 
 @app.route('/api/camera/stop_registration', methods=['POST'])
@@ -448,6 +451,12 @@ def camera_watchdog():
 
 # Start watchdog on import
 threading.Thread(target=camera_watchdog, daemon=True).start()
+
+# Start the SINGLETON AI background worker once for the process lifetime.
+# It shares frames via latest_frame/latest_frame_event and idles when no
+# frames arrive, so multiple video_feed clients no longer spawn competing workers.
+ai_worker_active.set()
+threading.Thread(target=ai_brain_worker, daemon=True).start()
 
 @app.route('/download_pdf')
 def export_pdf():
