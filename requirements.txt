@@ -10,3 +10,4 @@ requests
 tqdm
 scipy
 scikit-learn
+fpdf2

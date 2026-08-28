@@ -11,6 +11,7 @@ import threading
 import uuid
 import os
 import time
+from fpdf import FPDF
 from database_manager import DatabaseManager
 from camera_module import CameraModule
 from recognition_engine import RecognitionEngine
@@ -448,8 +449,8 @@ def camera_watchdog():
 # Start watchdog on import
 threading.Thread(target=camera_watchdog, daemon=True).start()
 
-@app.route('/download_csv')
-def export_csv():
+@app.route('/download_pdf')
+def export_pdf():
     from_date = request.args.get('from_date')
     to_date = request.args.get('to_date')
     dept = request.args.get('dept')
@@ -465,7 +466,6 @@ def export_csv():
         conditions = []
         params = []
         
-        # Join students table if filtering by dept or year
         if dept or year:
             query = '''
                 SELECT al.timestamp, al.student_name, al.status
@@ -493,17 +493,44 @@ def export_csv():
         cursor.execute(query, params)
         records = cursor.fetchall()
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['Timestamp', 'Student Name', 'Status'])
-    writer.writerows(records)
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, "Attendance Report", ln=True, align='C')
+    pdf.ln(5)
     
-    output.seek(0)
+    pdf.set_font("Arial", '', 10)
+    if from_date or to_date:
+        date_range = f"Date Range: {from_date or 'Start'} to {to_date or 'End'}"
+        pdf.cell(0, 8, date_range, ln=True, align='C')
+        pdf.ln(2)
+    if dept:
+        pdf.cell(0, 8, f"Department: {dept}", ln=True, align='C')
+        pdf.ln(2)
+    if year:
+        pdf.cell(0, 8, f"Year: {year}", ln=True, align='C')
+        pdf.ln(2)
+    pdf.ln(5)
+    
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(40, 10, "Timestamp", 1)
+    pdf.cell(60, 10, "Student Name", 1)
+    pdf.cell(40, 10, "Status", 1)
+    pdf.ln()
+    
+    pdf.set_font("Arial", '', 10)
+    for row in records:
+        pdf.cell(40, 10, str(row[0]), 1)
+        pdf.cell(60, 10, str(row[1]), 1)
+        pdf.cell(40, 10, str(row[2]), 1)
+        pdf.ln()
+    
+    pdf_bytes = pdf.output(dest='S').encode('latin-1')
     return send_file(
-        io.BytesIO(output.getvalue().encode()),
-        mimetype='text/csv',
+        io.BytesIO(pdf_bytes),
+        mimetype='application/pdf',
         as_attachment=True,
-        download_name='attendance_report.csv'
+        download_name='attendance_report.pdf'
     )
 
 @app.route('/api/recent')
@@ -569,7 +596,6 @@ def api_students():
     serializable_students = []
     for s in students_list:
         student_dict = s.copy()
-        student_dict['attendance_pct'] = 85  # Placeholder
         student_dict['today_status'] = today_status_map.get(s['name'], 'Pending')
         if 'descriptor' in student_dict:
             del student_dict['descriptor']

@@ -110,7 +110,7 @@ if errorlevel 1 (
 )
 
 echo       - Installing supporting libraries...
-"%VENV_DIR%\Scripts\python.exe" -m pip install --timeout %PIP_TIMEOUT% --retries %MAX_RETRIES% --prefer-binary requests tqdm scipy scikit-learn >> "%LOG_FILE%" 2>&1
+"%VENV_DIR%\Scripts\python.exe" -m pip install --timeout %PIP_TIMEOUT% --retries %MAX_RETRIES% --prefer-binary requests tqdm scipy scikit-learn fpdf2 >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     color 0c
     echo [!] CRITICAL ERROR: Failed to install supporting libraries.
