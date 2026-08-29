@@ -51,6 +51,59 @@
         }
     </style>
 </head>
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendify - Premium Student Attendance</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            900: '#0c4a6e',
+                        },
+                        dark: {
+                            bg: '#0f172a',
+                            card: '#1e293b',
+                            border: '#334155'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .view-section { display: none; }
+        .view-section.active { 
+            display: block; 
+            animation: fadeIn 0.3s ease-in-out; 
+        }
+        @keyframes fadeIn { 
+            from { opacity: 0; transform: translateY(10px); } 
+            to { opacity: 1; transform: translateY(0); } 
+        }
+        /* Custom scrollbar for a premium feel */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .dark ::-webkit-scrollbar-thumb { background: #475569; }
+        /* Sidebar transition for mobile */
+        .sidebar-transition {
+            transition: transform 0.3s ease-in-out;
+        }
+    </style>
+</head>
 <body class="bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100 font-sans antialiased transition-colors duration-300 flex h-screen overflow-hidden">
 
     <!-- Mobile Backdrop -->
@@ -65,6 +118,29 @@
             <button onclick="toggleSidebar()" class="ml-auto md:hidden text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
                 <i class="fa-solid fa-xmark text-xl"></i>
             </button>
+        </div>
+        
+        <!-- Year Selector Menu -->
+        <div class="px-4 py-4 border-b border-gray-200 dark:border-dark-border">
+            <label class="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2 px-2">Select Year View</label>
+            <div class="flex flex-col gap-1" id="sidebar-year-selector">
+                <button data-year="" class="year-btn active w-full text-left px-3 py-2 text-xs font-semibold rounded-lg bg-brand-50 dark:bg-brand-900/20 text-brand-600 dark:text-brand-500 transition-all flex items-center justify-between">
+                    <span>All Years</span>
+                    <span class="check-icon ml-auto"><i class="fa-solid fa-check text-[10px]"></i></span>
+                </button>
+                <button data-year="1st" class="year-btn w-full text-left px-3 py-2 text-xs font-semibold rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-dark-border/30 transition-all flex items-center justify-between">
+                    <span>1st Year</span>
+                </button>
+                <button data-year="2nd" class="year-btn w-full text-left px-3 py-2 text-xs font-semibold rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-dark-border/30 transition-all flex items-center justify-between">
+                    <span>2nd Year</span>
+                </button>
+                <button data-year="3rd" class="year-btn w-full text-left px-3 py-2 text-xs font-semibold rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-dark-border/30 transition-all flex items-center justify-between">
+                    <span>3rd Year</span>
+                </button>
+                <button data-year="4th" class="year-btn w-full text-left px-3 py-2 text-xs font-semibold rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-dark-border/30 transition-all flex items-center justify-between">
+                    <span>4th Year</span>
+                </button>
+            </div>
         </div>
         
         <nav class="flex-1 py-6 px-4 space-y-2 overflow-y-auto">
@@ -109,20 +185,7 @@
         </div>
         <div class="p-4 md:p-8 max-w-7xl mx-auto">
 
-            <!-- Global Year Selector -->
-            <div id="year-filter-bar" class="bg-white dark:bg-dark-card rounded-xl shadow-sm border border-gray-100 dark:border-dark-border px-4 py-3 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sticky top-14 md:top-0 z-10">
-                <div class="flex items-center gap-3">
-                    <i class="fa-solid fa-layer-group text-brand-500"></i>
-                    <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">Year View</span>
-                </div>
-                <select id="global-year-filter" class="w-full sm:w-auto bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-brand-500 outline-none text-gray-700 dark:text-gray-200">
-                    <option value="">All Years</option>
-                    <option value="1st">1st Year</option>
-                    <option value="2nd">2nd Year</option>
-                    <option value="3rd">3rd Year</option>
-                    <option value="4th">4th Year</option>
-                </select>
-            </div>
+            <!-- Global Year Selector removed (placed in Sidebar) -->
 
             <!-- Dashboard View -->
             <div id="view-dashboard" class="view-section active">
@@ -1090,22 +1153,51 @@
             updateWeeklyChart();
             fetchRecentList();
             loadStudents();
-
-            // Global Year Selector wiring
-            const globalYearFilter = document.getElementById('global-year-filter');
+            // Sidebar Year Selector wiring
+            const sidebarYearBtns = document.querySelectorAll('.year-btn');
             const reportYearSelect = document.getElementById('report-year');
-            globalYearFilter.addEventListener('change', () => {
-                selectedYear = globalYearFilter.value;
-                reportYearSelect.value = selectedYear;
-                updateStats();
-                updateWeeklyChart();
-                loadStudents();
-                fetchRecentList();
+            
+            sidebarYearBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    sidebarYearBtns.forEach(b => {
+                        b.classList.remove('bg-brand-50', 'dark:bg-brand-900/20', 'text-brand-600', 'dark:text-brand-500', 'active');
+                        b.classList.add('text-gray-600', 'dark:text-gray-400');
+                        const checkIcon = b.querySelector('.check-icon');
+                        if (checkIcon) checkIcon.remove();
+                    });
+                    
+                    btn.classList.remove('text-gray-600', 'dark:text-gray-400');
+                    btn.classList.add('bg-brand-50', 'dark:bg-brand-900/20', 'text-brand-600', 'dark:text-brand-500', 'active');
+                    
+                    // Add checkmark icon
+                    const checkSpan = document.createElement('span');
+                    checkSpan.className = 'check-icon ml-auto';
+                    checkSpan.innerHTML = '<i class="fa-solid fa-check text-[10px]"></i>';
+                    btn.appendChild(checkSpan);
+                    
+                    const newYear = btn.getAttribute('data-year');
+                    selectedYear = newYear;
+                    
+                    if (reportYearSelect) {
+                        reportYearSelect.value = newYear;
+                    }
+                    
+                    updateStats();
+                    updateWeeklyChart();
+                    loadStudents();
+                    fetchRecentList();
+                });
             });
-            reportYearSelect.addEventListener('change', () => {
-                globalYearFilter.value = reportYearSelect.value;
-                globalYearFilter.dispatchEvent(new Event('change'));
-            });
+            
+            if (reportYearSelect) {
+                reportYearSelect.addEventListener('change', () => {
+                    const targetYear = reportYearSelect.value;
+                    const matchingBtn = document.querySelector(`.year-btn[data-year="${targetYear}"]`);
+                    if (matchingBtn && !matchingBtn.classList.contains('active')) {
+                        matchingBtn.click();
+                    }
+                });
+            }
 
             // Set default report dates (today)
             const today = new Date().toISOString().split('T')[0];
@@ -1489,9 +1581,9 @@
                 });
             }
             
-            // Fetch loop every 5 seconds for stats, 3 seconds for recent scans
-            setInterval(updateStats, 5000);
-            setInterval(fetchRecentList, 3000);
+            // Fetch loop every 2 seconds for stats and recent scans (real-time updates)
+            setInterval(updateStats, 2000);
+            setInterval(fetchRecentList, 2000);
         });
     </script>
 </body>
