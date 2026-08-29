@@ -51,59 +51,6 @@
         }
     </style>
 </head>
-<!DOCTYPE html>
-<html lang="en" class="dark">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Attendify - Premium Student Attendance</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        brand: {
-                            50: '#f0f9ff',
-                            100: '#e0f2fe',
-                            500: '#0ea5e9',
-                            600: '#0284c7',
-                            900: '#0c4a6e',
-                        },
-                        dark: {
-                            bg: '#0f172a',
-                            card: '#1e293b',
-                            border: '#334155'
-                        }
-                    }
-                }
-            }
-        }
-    </script>
-    <style>
-        .view-section { display: none; }
-        .view-section.active { 
-            display: block; 
-            animation: fadeIn 0.3s ease-in-out; 
-        }
-        @keyframes fadeIn { 
-            from { opacity: 0; transform: translateY(10px); } 
-            to { opacity: 1; transform: translateY(0); } 
-        }
-        /* Custom scrollbar for a premium feel */
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        .dark ::-webkit-scrollbar-thumb { background: #475569; }
-        /* Sidebar transition for mobile */
-        .sidebar-transition {
-            transition: transform 0.3s ease-in-out;
-        }
-    </style>
-</head>
 <body class="bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100 font-sans antialiased transition-colors duration-300 flex h-screen overflow-hidden">
 
     <!-- Mobile Backdrop -->
@@ -195,7 +142,7 @@
                         <p class="text-gray-500 dark:text-gray-400 mt-1" id="current-date">Loading date...</p>
                     </div>
                     <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-                        <!-- Day Type Control Widget -->
+<!-- Day Type Control Widget -->
                         <div class="bg-white dark:bg-dark-card px-4 py-2 rounded-xl shadow-sm border border-gray-100 dark:border-dark-border flex items-center gap-3">
                             <i class="fa-regular fa-calendar-days text-brand-500 text-xl text-indigo-500"></i>
                             <div class="flex flex-col">
@@ -203,10 +150,11 @@
                                 <div class="flex items-center gap-2 mt-0.5">
                                     <input type="date" id="calendar-control-date" class="bg-transparent text-xs font-semibold text-gray-700 dark:text-gray-300 outline-none border-none p-0 w-24 cursor-pointer">
                                     <select id="calendar-control-status" class="bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded px-2 py-0.5 text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer">
-                                        <option value="Working">Working</option>
+                                        <option value="Working">Working Day</option>
                                         <option value="Holiday">Holiday</option>
                                     </select>
                                 </div>
+                                <span id="calendar-control-hint" class="text-[9px] text-gray-400 dark:text-gray-500 mt-0.5">Sundays default to Holiday</span>
                             </div>
                         </div>
                         
@@ -380,7 +328,7 @@
                         <div class="w-16 h-16 bg-brand-50 dark:bg-brand-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
                             <i class="fa-solid fa-file-pdf text-2xl text-brand-500"></i>
                         </div>
-                        <p class="text-gray-500 dark:text-gray-400 mb-5 text-sm">Download filtered attendance data as PDF</p>
+                        <p class="text-gray-500 dark:text-gray-400 mb-5 text-sm">Download the daily attendance roster as PDF — one row per student per day (roll no, name, status)</p>
                         <button id="btn-export-pdf" class="inline-flex items-center gap-2 bg-brand-500 hover:bg-brand-600 text-white px-8 py-3 rounded-lg font-medium transition-colors shadow-lg shadow-brand-500/25">
                             <i class="fa-solid fa-download"></i> Export Filtered PDF
                         </button>
@@ -1181,12 +1129,24 @@
             if (calDateInput) {
                 calDateInput.value = localToday;
                 
-                async function fetchDateStatus(dateStr) {
+async function fetchDateStatus(dateStr) {
                     try {
                         const r = await fetch(`/api/calendar/get_status?date=${dateStr}`);
                         const data = await r.json();
                         if (data.status) {
                             calStatusSelect.value = data.status;
+                        }
+                        const hintEl = document.getElementById('calendar-control-hint');
+                        if (hintEl) {
+                            if (data.default) {
+                                const dayName = new Date(dateStr + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long' });
+                                const defaultType = data.status === 'Holiday' ? 'a Holiday' : 'a Working Day';
+                                hintEl.textContent = `Default: every ${dayName} is ${defaultType} unless overridden`;
+                                hintEl.className = 'text-[9px] text-gray-400 dark:text-gray-500 mt-0.5';
+                            } else {
+                                hintEl.textContent = `Manually overridden as ${data.status} Day`;
+                                hintEl.className = 'text-[9px] mt-0.5 font-semibold ' + (data.status === 'Holiday' ? 'text-red-500' : 'text-emerald-500');
+                            }
                         }
                     } catch (e) {
                         console.error("Error fetching date status:", e);
@@ -1202,11 +1162,12 @@
                         });
                         const data = await r.json();
                         if (data.success) {
-                            showToast('Calendar Updated', `Marked ${dateStr} as ${status}.`);
+                            showToast('Calendar Updated', `Marked ${dateStr} as ${status} Day.`);
                             // Recalculate stats & reload students
                             updateStats();
                             updateWeeklyChart();
                             loadStudents();
+                            fetchDateStatus(dateStr);
                         } else {
                             showToast('Error', data.error, 'error');
                         }
@@ -1273,8 +1234,11 @@
                 });
             }
 
-            // Set default report dates (today)
+// Set default report dates (today only = single-day roster)
             const today = new Date().toISOString().split('T')[0];
+            if (!document.getElementById('report-from-date').value) {
+                document.getElementById('report-from-date').value = today;
+            }
             document.getElementById('report-to-date').value = today;
 
             // CSV Export with filters

@@ -459,83 +459,220 @@ threading.Thread(target=camera_watchdog, daemon=True).start()
 ai_worker_active.set()
 threading.Thread(target=ai_brain_worker, daemon=True).start()
 
+def _first_existing(candidates):
+    """Return the first existing path from *candidates*, or None."""
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
+def _report_font_paths():
+    """Resolve the primary (bundled DejaVuSans) font and a best-effort Unicode
+    fallback font so PDF exports can render non-Latin (e.g. Indic) names."""
+    repo_fonts = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts')
+
+    primary = _first_existing([
+        os.path.join(repo_fonts, 'DejaVuSans.ttf'),
+        r'C:\Windows\Fonts\DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/TTF/DejaVuSans.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+    ])
+    primary_bold = _first_existing([
+        os.path.join(repo_fonts, 'DejaVuSans-Bold.ttf'),
+        r'C:\Windows\Fonts\DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
+    ])
+    # System fonts with broad (Indic etc.) coverage, used as glyph fallbacks.
+    fallbacks = _first_existing([
+        r'C:\Windows\Fonts\Nirmala.ttc',          # Windows Indic UI font
+        r'C:\Windows\Fonts\NirmalaUI.ttf',
+        r'C:\Windows\Fonts\NotoSans-Regular.ttf',
+        r'C:\Windows\Fonts\NotoSerif-Regular.ttf',
+        r'C:\Windows\Fonts\NotoSansTamil-Regular.ttf',
+        r'C:\Windows\Fonts\NotoSerifTamil-Regular.ttf',
+        r'C:\Windows\Fonts\mangal.ttf',           # Devanagari
+        r'C:\Windows\Fonts\latha.ttf',            # Tamil
+        '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
+    ])
+    return primary, primary_bold, fallbacks
+
+
 @app.route('/download_pdf')
 def export_pdf():
     from_date = request.args.get('from_date')
     to_date = request.args.get('to_date')
     dept = request.args.get('dept')
     year = request.args.get('year')
-    
+
+    today_local = datetime.now().date()
+    try:
+        d_from = datetime.strptime(from_date, '%Y-%m-%d').date() if from_date else today_local
+    except (ValueError, TypeError):
+        d_from = today_local
+    try:
+        d_to = datetime.strptime(to_date, '%Y-%m-%d').date() if to_date else today_local
+    except (ValueError, TypeError):
+        d_to = today_local
+    if d_to < d_from:
+        d_from, d_to = d_to, d_from
+
     with db_manager.get_connection() as conn:
         cursor = conn.cursor()
-        
-        query = '''
-            SELECT al.timestamp, al.student_name, al.status
-            FROM attendance_log al
-        '''
-        conditions = []
-        params = []
-        
-        if dept or year:
-            query = '''
-                SELECT al.timestamp, al.student_name, al.status
-                FROM attendance_log al
-                JOIN students s ON al.student_name = s.name
-            '''
-            if dept:
-                conditions.append("s.dept = ?")
-                params.append(dept)
-            if year:
-                conditions.append("s.year = ?")
-                params.append(year)
-        
-        if from_date:
-            conditions.append("date(al.timestamp) >= ?")
-            params.append(from_date)
-        if to_date:
-            conditions.append("date(al.timestamp) <= ?")
-            params.append(to_date)
-        
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-        query += " ORDER BY al.timestamp DESC"
-        
-        cursor.execute(query, params)
-        records = cursor.fetchall()
 
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, "Attendance Report", ln=True, align='C')
-    pdf.ln(5)
-    
-    pdf.set_font("Arial", '', 10)
-    if from_date or to_date:
-        date_range = f"Date Range: {from_date or 'Start'} to {to_date or 'End'}"
-        pdf.cell(0, 8, date_range, ln=True, align='C')
-        pdf.ln(2)
-    if dept:
-        pdf.cell(0, 8, f"Department: {dept}", ln=True, align='C')
-        pdf.ln(2)
-    if year:
-        pdf.cell(0, 8, f"Year: {year}", ln=True, align='C')
-        pdf.ln(2)
-    pdf.ln(5)
-    
-    pdf.set_font("Arial", 'B', 10)
-    pdf.cell(40, 10, "Timestamp", 1)
-    pdf.cell(60, 10, "Student Name", 1)
-    pdf.cell(40, 10, "Status", 1)
-    pdf.ln()
-    
-    pdf.set_font("Arial", '', 10)
-    for row in records:
-        pdf.cell(40, 10, str(row[0]), 1)
-        pdf.cell(60, 10, str(row[1]), 1)
-        pdf.cell(40, 10, str(row[2]), 1)
+        # Filtered roster of registered students
+        student_query = 'SELECT name, rollno FROM students'
+        conditions, params = [], []
+        if dept:
+            conditions.append('dept = ?')
+            params.append(dept)
+        if year:
+            conditions.append('year = ?')
+            params.append(year)
+        if conditions:
+            student_query += ' WHERE ' + ' AND '.join(conditions)
+        student_query += ' ORDER BY rollno, name'
+        cursor.execute(student_query, params)
+        students = [{'name': r[0], 'rollno': (r[1] or '—').strip() or '—'} for r in cursor.fetchall()]
+
+        # Most recent status per student per day (dedupes multi-log days)
+        cursor.execute('''
+            SELECT student_name, date(timestamp) AS day, status
+            FROM attendance_log
+            WHERE date(timestamp) BETWEEN ? AND ?
+            ORDER BY timestamp DESC
+        ''', (d_from.isoformat(), d_to.isoformat()))
+        latest_status = {}
+        for sname, day, status in cursor.fetchall():
+            latest_status.setdefault((day, sname), status)
+
+    days = []
+    d = d_from
+    while d <= d_to:
+        days.append(d)
+        d += timedelta(days=1)
+
+    # Build one roster table per day
+    day_sections = []  # (day_str, [(rollno, name, status), ...])
+    for day in days:
+        day_str = day.isoformat()
+        is_holiday = db_manager.get_calendar_exception(day_str, return_default=True)[0] == 'Holiday'
+        rows = []
+        for s in students:
+            status = latest_status.get((day_str, s['name']))
+            if status is None:
+                if is_holiday:
+                    status = 'Holiday'
+                elif day >= today_local:
+                    status = 'Pending'
+                else:
+                    status = 'Absent'
+            rows.append((s['rollno'], s['name'], status))
+        day_sections.append((day_str, rows))
+
+    regular_path, bold_path, fallback_path = _report_font_paths()
+    use_ttf = regular_path is not None
+
+    class ReportPDF(FPDF):
+        def footer(self):
+            self.set_y(-15)
+            if use_ttf:
+                self.set_font('Report', '', 8)
+            else:
+                self.set_font('Arial', '', 8)
+            self.set_text_color(120, 120, 120)
+            self.cell(0, 10, f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  |  Page {self.page_no()}", align='C')
+            self.set_text_color(0, 0, 0)
+
+    pdf = ReportPDF()
+    pdf.set_auto_page_break(auto=True, margin=20)
+
+    if use_ttf:
+        pdf.add_font('Report', '', regular_path)
+        pdf.add_font('Report', 'B', bold_path or regular_path)
+        if fallback_path:
+            same_file = os.path.normcase(os.path.abspath(fallback_path)) == os.path.normcase(os.path.abspath(regular_path))
+            if not same_file:
+                try:
+                    pdf.add_font('ReportFB', '', fallback_path)
+                    pdf.set_fallback_fonts(['ReportFB'], exact_match=False)
+                except Exception as e:
+                    print(f"[PDF WARNING] Failed to register Unicode fallback font: {e}")
+
+    def set_report_font(style='', size=10):
+        if use_ttf:
+            pdf.set_font('Report', style, size)
+        else:
+            pdf.set_font('Arial', style, size)
+
+    def status_color(status):
+        return {
+            'Present': (187, 247, 208),
+            'Late':    (254, 240, 138),
+            'Absent':  (254, 202, 202),
+            'Holiday': (226, 232, 240),
+            'Pending': (191, 219, 254),
+        }.get(status, (226, 232, 240))
+
+    col_widths = (30, 100, 40)
+
+    def draw_day_header(day_title, continued=False):
+        set_report_font('B', 11)
+        pdf.set_fill_color(15, 118, 209)
+        pdf.set_text_color(255, 255, 255)
+        title = f'{day_title} (continued)' if continued else day_title
+        pdf.cell(0, 9, title, border=1, fill=True, align='L', new_x='LMARGIN', new_y='NEXT')
+        pdf.set_text_color(0, 0, 0)
+        set_report_font('B', 10)
+        pdf.set_fill_color(226, 232, 240)
+        for w, label in zip(col_widths, ('Roll No', 'Name', 'Status')):
+            pdf.cell(w, 8, label, border=1, fill=True, align='C')
         pdf.ln()
-    
-    pdf_bytes = pdf.output(dest='S').encode('latin-1')
+        set_report_font('', 10)
+
+    day_label = f'{year} Attendance' if year else 'All Years Attendance'
+    subtitle = [f"Date Range: {d_from} to {d_to}"]
+    if dept:
+        subtitle.append(f"Department: {dept}")
+
+    pdf.add_page()
+
+    set_report_font('B', 16)
+    pdf.cell(0, 10, day_label, align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(2)
+    set_report_font('', 10)
+    pdf.cell(0, 8, '  |  '.join(subtitle), align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(6)
+
+    if not students:
+        pdf.cell(0, 9, 'No students match the selected filters.', align='C', new_x='LMARGIN', new_y='NEXT')
+    else:
+        for day_str, rows in day_sections:
+            dt = datetime.strptime(day_str, '%Y-%m-%d')
+            day_title = dt.strftime('%A, %d %B %Y')
+
+            if pdf.page_break_trigger - pdf.get_y() < 46:
+                pdf.add_page()
+            draw_day_header(day_title)
+
+            for idx, (rollno, sname, status) in enumerate(rows):
+                if pdf.page_break_trigger - pdf.get_y() < 12:
+                    pdf.add_page()
+                    draw_day_header(day_title, continued=True)
+                zebra = idx % 2 == 0
+                if zebra:
+                    pdf.set_fill_color(241, 245, 249)
+                pdf.cell(col_widths[0], 9, rollno, border=1, fill=zebra)
+                pdf.cell(col_widths[1], 9, sname, border=1, fill=zebra)
+                pdf.set_fill_color(*status_color(status))
+                pdf.cell(col_widths[2], 9, status, border=1, fill=True, align='C')
+                pdf.ln()
+            pdf.ln(4)
+
+    pdf_bytes = bytes(pdf.output(dest='S'))
     return send_file(
         io.BytesIO(pdf_bytes),
         mimetype='application/pdf',
@@ -996,8 +1133,8 @@ def api_get_calendar_status():
     date_str = request.args.get('date')
     if not date_str:
         return jsonify({'error': 'Missing date'}), 400
-    status = db_manager.get_calendar_exception(date_str)
-    return jsonify({'status': status})
+    status, is_default = db_manager.get_calendar_exception(date_str, return_default=True)
+    return jsonify({'status': status, 'default': is_default})
 
 
 @app.route('/api/calendar/set_status', methods=['POST'])

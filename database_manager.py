@@ -282,19 +282,21 @@ class DatabaseManager:
             conn.commit()
             return cursor.rowcount > 0
 
-    def get_calendar_exception(self, date_str):
+    def get_calendar_exception(self, date_str, return_default=False):
         from datetime import datetime
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT status FROM calendar_exceptions WHERE date = ?", (date_str,))
             row = cursor.fetchone()
             if row:
-                return row[0]
+                return (row[0], False) if return_default else row[0]
             try:
                 dt = datetime.strptime(date_str, "%Y-%m-%d")
-                return "Holiday" if dt.weekday() == 6 else "Working"
+                default_status = "Holiday" if dt.weekday() == 6 else "Working"
+                return (default_status, True) if return_default else default_status
             except:
-                return "Working"
+                default_status = "Working"
+                return (default_status, True) if return_default else default_status
 
     def set_calendar_exception(self, date_str, status):
         with self.get_connection() as conn:
