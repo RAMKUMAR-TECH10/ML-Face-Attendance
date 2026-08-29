@@ -991,6 +991,26 @@ def api_manual_attendance():
     return jsonify({'success': True, 'message': f'Marked {student_name} as {status}'})
 
 
+@app.route('/api/calendar/get_status')
+def api_get_calendar_status():
+    date_str = request.args.get('date')
+    if not date_str:
+        return jsonify({'error': 'Missing date'}), 400
+    status = db_manager.get_calendar_exception(date_str)
+    return jsonify({'status': status})
+
+
+@app.route('/api/calendar/set_status', methods=['POST'])
+def api_set_calendar_status():
+    data = request.json
+    date_str = data.get('date')
+    status = data.get('status')
+    if not date_str or not status:
+        return jsonify({'error': 'Missing date or status'}), 400
+    db_manager.set_calendar_exception(date_str, status)
+    return jsonify({'success': True, 'message': f'Set {date_str} as {status}'})
+
+
 def cleanup():
     """Only release camera on full system shutdown."""
     print("Releasing camera...")

@@ -9,7 +9,9 @@ Attendify is a state-of-the-art web-based student attendance system that leverag
 - **Real-Time AI Face Recognition**: Automatically detects and identifies registered students from a live camera feed with low latency (under 200ms processing window).
 - **Face Capture & Enrollment Guidance**: Step-by-step guidance interface to enroll new students using a live camera capture or photo upload. Incorporates duplicate checking based on contact details and biometrics.
 - **Year-wise Selection & Filtering**: Instantly filter all views (Dashboard statistics, Student Directory, Manual Attendance, Reports) by 1st, 2nd, 3rd, and 4th Year Level using a dedicated sidebar selector menu.
-- **Interactive Data Visualization**: Dynamic donut and weekly stacked bar charts powered by Chart.js that update in real time.
+- **Day Type & Holiday Control**: A calendar control widget in the top-right header of the dashboard allows users to mark any day as a **Working Day** or a **Holiday**. Recalculates stats and student attendance percentages instantly.
+- **Sunday Default Logic**: Sundays are automatically flagged as holidays to maintain accurate attendance percentages, with the ability to override them manually to working days.
+- **Interactive Data Visualization**: Dynamic doughnut and weekly stacked bar charts powered by Chart.js that update in real time.
 - **Manual Attendance Overrides**: One-click toggle buttons to manually mark a student as **Present**, **Absent**, or **Late** (with automatic Late designation for sign-ins after 9:00 AM).
 - **Filtered PDF Reports**: Instantly export custom attendance reports to PDF, filtered by date range, department, and year level.
 - **Sleek Light/Dark Mode**: High-fidelity modern UI styling using Tailwind CSS with glassmorphic elements and seamless transition effects.

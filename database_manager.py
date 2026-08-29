@@ -39,6 +39,13 @@ class DatabaseManager:
                     status TEXT DEFAULT 'Present'
                 )
             ''')
+            # Calendar Exceptions table (for Holidays/Working days)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS calendar_exceptions (
+                    date TEXT PRIMARY KEY,
+                    status TEXT NOT NULL
+                )
+            ''')
             
             # Migration: add missing columns if they don't exist
             columns = [
@@ -116,6 +123,7 @@ class DatabaseManager:
             return cursor.rowcount > 0
 
     def get_all_students(self, year=None):
+        from datetime import datetime, timedelta
         with self.get_connection() as conn:
             cursor = conn.cursor()
             if year:
@@ -123,6 +131,69 @@ class DatabaseManager:
             else:
                 cursor.execute("SELECT id, name, rollno, dept, year, email, contact, faceDescriptor FROM students")
             rows = cursor.fetchall()
+            
+            # Recalculate attendance percentages
+            # 1. Get calendar exceptions
+            exceptions = {}
+            try:
+                cursor.execute("SELECT date, status FROM calendar_exceptions")
+                for d, s in cursor.fetchall():
+                    exceptions[d] = s
+            except sqlite3.OperationalError:
+                pass # Table doesn't exist yet (handled in init_db)
+                
+            # 2. Get range of dates
+            start_date = None
+            try:
+                cursor.execute("SELECT MIN(date(timestamp)) FROM attendance_log")
+                min_log_date_str = cursor.fetchone()[0]
+            except:
+                min_log_date_str = None
+                
+            min_exception_date_str = min(exceptions.keys()) if exceptions else None
+            today_local = datetime.now().date()
+            
+            for date_str in (min_log_date_str, min_exception_date_str):
+                if date_str:
+                    try:
+                        d = datetime.strptime(date_str[:10], "%Y-%m-%d").date()
+                        if start_date is None or d < start_date:
+                            start_date = d
+                    except ValueError:
+                        pass
+                        
+            if start_date is None or start_date > today_local:
+                start_date = today_local
+                
+            # 3. Generate all working days
+            working_days = set()
+            curr = start_date
+            while curr <= today_local:
+                date_str = curr.isoformat()
+                if date_str in exceptions:
+                    if exceptions[date_str] == 'Working':
+                        working_days.add(date_str)
+                else:
+                    if curr.weekday() != 6: # 6 is Sunday
+                        working_days.add(date_str)
+                curr += timedelta(days=1)
+                
+            total_working = len(working_days)
+            
+            # 4. Get present days count per student
+            student_present_counts = {}
+            if total_working > 0:
+                cursor.execute('''
+                    SELECT student_name, date(timestamp) 
+                    FROM attendance_log 
+                    WHERE status IN ('Present', 'Late')
+                ''')
+                student_present_days = {}
+                for name, date_str in cursor.fetchall():
+                    if date_str in working_days:
+                        student_present_days.setdefault(name, set()).add(date_str)
+                for name, dates in student_present_days.items():
+                    student_present_counts[name] = len(dates)
             
             results = []
             for row in rows:
@@ -140,6 +211,11 @@ class DatabaseManager:
                 if descriptor.ndim != 1 or descriptor.shape[0] not in (128, 512):
                     print(f"[DB WARNING] Student '{name}' (id={sid}) has invalid descriptor shape {descriptor.shape}, skipping.")
                     continue
+                
+                # Compute attendance percentage
+                present_count = student_present_counts.get(name, 0)
+                pct = 100 if total_working == 0 else int(round((present_count / total_working) * 100))
+                
                 results.append({
                     'id': sid,
                     'name': name,
@@ -148,7 +224,8 @@ class DatabaseManager:
                     'year': year,
                     'email': email,
                     'contact': contact,
-                    'descriptor': descriptor
+                    'descriptor': descriptor,
+                    'attendance_pct': pct
                 })
             return results
 
@@ -204,3 +281,23 @@ class DatabaseManager:
             cursor.execute("DELETE FROM students WHERE id = ?", (student_id,))
             conn.commit()
             return cursor.rowcount > 0
+
+    def get_calendar_exception(self, date_str):
+        from datetime import datetime
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT status FROM calendar_exceptions WHERE date = ?", (date_str,))
+            row = cursor.fetchone()
+            if row:
+                return row[0]
+            try:
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
+                return "Holiday" if dt.weekday() == 6 else "Working"
+            except:
+                return "Working"
+
+    def set_calendar_exception(self, date_str, status):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT OR REPLACE INTO calendar_exceptions (date, status) VALUES (?, ?)", (date_str, status))
+            conn.commit()
