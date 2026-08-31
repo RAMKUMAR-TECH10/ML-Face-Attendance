@@ -246,7 +246,12 @@
                         <table class="w-full text-left whitespace-nowrap">
                             <thead class="bg-gray-50 dark:bg-dark-border/30 text-gray-500 dark:text-gray-400 text-sm uppercase font-semibold">
                                 <tr>
-                                    <th class="px-6 py-4 border-b border-gray-100 dark:border-dark-border">Roll #</th>
+                                    <th id="th-rollno" class="px-6 py-4 border-b border-gray-100 dark:border-dark-border cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-dark-border/50 transition-colors">
+                                        <div class="flex items-center gap-1">
+                                            <span>Roll #</span>
+                                            <span id="rollno-sort-icon" class="text-gray-400"><i class="fa-solid fa-sort"></i></span>
+                                        </div>
+                                    </th>
                                     <th class="px-6 py-4 border-b border-gray-100 dark:border-dark-border">Name</th>
                                     <th class="px-6 py-4 border-b border-gray-100 dark:border-dark-border">Dept</th>
                                     <th class="px-6 py-4 border-b border-gray-100 dark:border-dark-border text-center">Year</th>
@@ -562,6 +567,8 @@
         let cameraRunning = false;
         let heartbeatInterval = null;
         let selectedYear = '';
+        let currentStudents = [];
+        let rollNoSortDirection = null; // 'asc', 'desc', or null
         const htmlEl = document.documentElement;
 
         // Auto-check local storage
@@ -872,88 +879,104 @@
             fetch(url)
                 .then(r => r.json())
                 .then(data => {
-                    const tbody = document.querySelector('#view-students tbody');
-                    const attendGrid = document.querySelector('#view-attendance .grid');
-                    
-                    tbody.innerHTML = '';
-                    attendGrid.innerHTML = '';
-
-                    if(data.length === 0) {
-                        tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-8 text-center text-sm text-gray-500">No students found.</td></tr>`;
-                        attendGrid.innerHTML = `<div class="col-span-full text-center text-gray-500 py-8">No students available for attendance.</div>`;
-                        return;
-                    }
-
-                    data.forEach(s => {
-                        // Populate Table
-                        const tr = document.createElement('tr');
-                        tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors';
-                        tr.innerHTML = `
-                            <td class="px-6 py-4 font-mono text-gray-600 dark:text-gray-300 font-bold">${escHtml(s.rollno) || 'N/A'}</td>
-                            <td class="px-6 py-4 font-medium flex items-center gap-3 text-gray-900 dark:text-white">
-                                <img src="https://ui-avatars.com/api/?name=${encodeURIComponent(s.name)}&background=random&color=fff" class="w-8 h-8 rounded-full shadow-sm">
-                                ${escHtml(s.name)}
-                            </td>
-                            <td class="px-6 py-4 text-gray-600 dark:text-gray-300">${escHtml(s.dept) || 'N/A'}</td>
-                            <td class="px-6 py-4 text-center text-gray-600 dark:text-gray-300">
-                                <span class="bg-gray-100 dark:bg-dark-border/50 px-2 py-1 rounded text-xs font-semibold uppercase tracking-wider">${escHtml(s.year) || 'N/A'}</span>
-                            </td>
-                            <td class="px-6 py-4 text-center">
-                                ${s.today_status === 'Present' || s.today_status === 'ALREADY RECORDED'
-                                    ? '<span class="inline-flex items-center gap-1 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-700 px-2.5 py-1 rounded-full text-xs font-bold w-24 justify-center"><i class="fa-solid fa-check-circle"></i> Present</span>'
-                                    : (s.today_status === 'Absent'
-                                        ? '<span class="inline-flex items-center gap-1 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-700 px-2.5 py-1 rounded-full text-xs font-bold w-24 justify-center"><i class="fa-solid fa-times-circle"></i> Absent</span>'
-                                        : (s.today_status === 'Late'
-                                            ? '<span class="inline-flex items-center gap-1 bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-700 px-2.5 py-1 rounded-full text-xs font-bold w-24 justify-center"><i class="fa-solid fa-clock"></i> Late</span>'
-                                            : '<span class="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-700/40 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 px-2.5 py-1 rounded-full text-xs font-bold w-24 justify-center"><i class="fa-regular fa-clock"></i> Pending</span>')
-                                              )
-                                    }
-                            </td>
-                            <td class="px-6 py-4 text-center">
-                                <div class="flex items-center justify-center gap-2">
-                                    <div class="w-16 bg-gray-200 dark:bg-dark-border rounded-full h-1.5 flex-1 max-w-[60px]">
-                                        <div class="bg-brand-500 h-1.5 rounded-full" style="width: ${s.attendance_pct || 0}%"></div>
-                                    </div>
-                                    <span class="text-xs font-bold text-gray-600 dark:text-gray-400">${s.attendance_pct || 0}%</span>
-                                </div>
-                            </td>
-                            <td class="px-6 py-4 text-right">
-                                <button data-student-id="${s.id}" data-action="edit" class="student-action text-brand-500 hover:text-brand-600 mx-2 p-1 transition-colors hover:scale-110"><i class="fa-solid fa-pen-to-square"></i></button>
-                                <button data-student-id="${s.id}" data-action="delete" class="student-action text-red-500 hover:text-red-600 p-1 transition-colors hover:scale-110"><i class="fa-solid fa-trash-can"></i></button>
-                            </td>
-                        `;
-                        tbody.appendChild(tr);
-
-                        const editBtn = tr.querySelector('[data-action="edit"]');
-                        const delBtn = tr.querySelector('[data-action="delete"]');
-                        if (editBtn) editBtn.addEventListener('click', () => editStudent(s.id));
-                        if (delBtn) delBtn.addEventListener('click', () => deleteStudent(s.id, s.name));
-
-                        // Populate Attendance Cards
-                        const card = document.createElement('div');
-                        card.className = 'bg-white dark:bg-dark-card rounded-xl p-6 shadow-sm border border-gray-100 dark:border-dark-border text-center hover:shadow-md transition-all duration-200 transform hover:-translate-y-1';
-                        const pClass = (s.today_status === 'Present' || s.today_status === 'ALREADY RECORDED') ? 'bg-green-500 text-white shadow-lg hover:bg-green-600' : 'bg-green-100 text-green-600 hover:bg-green-500 hover:text-white hover:shadow-lg dark:bg-green-900/40 dark:text-green-400';
-                        const aClass = s.today_status === 'Absent' ? 'bg-red-500 text-white shadow-lg hover:bg-red-600' : 'bg-red-100 text-red-600 hover:bg-red-500 hover:text-white hover:shadow-lg dark:bg-red-900/40 dark:text-red-400';
-                        const lClass = s.today_status === 'Late' ? 'bg-yellow-500 text-white shadow-lg hover:bg-yellow-600' : 'bg-yellow-100 text-yellow-600 hover:bg-yellow-500 hover:text-white hover:shadow-lg dark:bg-yellow-900/40 dark:text-yellow-400';
-
-                        card.innerHTML = `
-                            <img src="https://ui-avatars.com/api/?name=${encodeURIComponent(s.name)}&background=random&color=fff&size=64" class="mx-auto rounded-full mb-3 shadow-sm">
-                            <h3 class="font-semibold text-lg text-gray-900 dark:text-white">${escHtml(s.name)}</h3>
-                            <p class="text-xs text-gray-500 dark:text-gray-400 mb-5 font-mono">ID-${escHtml(s.id)}</p>
-                            <div class="flex justify-center gap-3">
-                                <button data-status="Present" class="mark-btn w-10 h-10 rounded-full font-bold transition-all focus:outline-none ${pClass}">P</button>
-                                <button data-status="Absent" class="mark-btn w-10 h-10 rounded-full font-bold transition-all focus:outline-none ${aClass}">A</button>
-                                <button data-status="Late" class="mark-btn w-10 h-10 rounded-full font-bold transition-all focus:outline-none ${lClass}">L</button>
-                            </div>
-                        `;
-                        attendGrid.appendChild(card);
-
-                        card.querySelectorAll('.mark-btn').forEach((btn) => {
-                            btn.addEventListener('click', () => markManual(s.name, btn.dataset.status, btn));
-                        });
-                    });
+                    currentStudents = data;
+                    renderCachedStudents();
                 })
                 .catch(e => console.error("Error loading students:", e));
+        }
+
+        function renderCachedStudents() {
+            const tbody = document.querySelector('#view-students tbody');
+            const attendGrid = document.querySelector('#view-attendance .grid');
+            
+            tbody.innerHTML = '';
+            attendGrid.innerHTML = '';
+
+            if (currentStudents.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-8 text-center text-sm text-gray-500">No students found.</td></tr>`;
+                attendGrid.innerHTML = `<div class="col-span-full text-center text-gray-500 py-8">No students available for attendance.</div>`;
+                return;
+            }
+
+            // Perform sorting if active
+            let sortedStudents = [...currentStudents];
+            if (rollNoSortDirection) {
+                sortedStudents.sort((a, b) => {
+                    const valA = String(a.rollno || '').trim();
+                    const valB = String(b.rollno || '').trim();
+                    const comparison = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+                    return rollNoSortDirection === 'asc' ? comparison : -comparison;
+                });
+            }
+
+            sortedStudents.forEach(s => {
+                // Populate Table
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors';
+                tr.innerHTML = `
+                    <td class="px-6 py-4 font-mono text-gray-600 dark:text-gray-300 font-bold">${escHtml(s.rollno) || 'N/A'}</td>
+                    <td class="px-6 py-4 font-medium flex items-center gap-3 text-gray-900 dark:text-white">
+                        <img src="https://ui-avatars.com/api/?name=${encodeURIComponent(s.name)}&background=random&color=fff" class="w-8 h-8 rounded-full shadow-sm">
+                        ${escHtml(s.name)}
+                    </td>
+                    <td class="px-6 py-4 text-gray-600 dark:text-gray-300">${escHtml(s.dept) || 'N/A'}</td>
+                    <td class="px-6 py-4 text-center text-gray-600 dark:text-gray-300">
+                        <span class="bg-gray-100 dark:bg-dark-border/50 px-2 py-1 rounded text-xs font-semibold uppercase tracking-wider">${escHtml(s.year) || 'N/A'}</span>
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                        ${s.today_status === 'Present' || s.today_status === 'ALREADY RECORDED'
+                            ? '<span class="inline-flex items-center gap-1 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-700 px-2.5 py-1 rounded-full text-xs font-bold w-24 justify-center"><i class="fa-solid fa-check-circle"></i> Present</span>'
+                            : (s.today_status === 'Absent'
+                                ? '<span class="inline-flex items-center gap-1 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-700 px-2.5 py-1 rounded-full text-xs font-bold w-24 justify-center"><i class="fa-solid fa-times-circle"></i> Absent</span>'
+                                : (s.today_status === 'Late'
+                                    ? '<span class="inline-flex items-center gap-1 bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-700 px-2.5 py-1 rounded-full text-xs font-bold w-24 justify-center"><i class="fa-solid fa-clock"></i> Late</span>'
+                                    : '<span class="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-700/40 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 px-2.5 py-1 rounded-full text-xs font-bold w-24 justify-center"><i class="fa-regular fa-clock"></i> Pending</span>')
+                                      )
+                            }
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                        <div class="flex items-center justify-center gap-2">
+                            <div class="w-16 bg-gray-200 dark:bg-dark-border rounded-full h-1.5 flex-1 max-w-[60px]">
+                                <div class="bg-brand-500 h-1.5 rounded-full" style="width: ${s.attendance_pct || 0}%"></div>
+                            </div>
+                            <span class="text-xs font-bold text-gray-600 dark:text-gray-400">${s.attendance_pct || 0}%</span>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4 text-right">
+                        <button data-student-id="${s.id}" data-action="edit" class="student-action text-brand-500 hover:text-brand-600 mx-2 p-1 transition-colors hover:scale-110"><i class="fa-solid fa-pen-to-square"></i></button>
+                        <button data-student-id="${s.id}" data-action="delete" class="student-action text-red-500 hover:text-red-600 p-1 transition-colors hover:scale-110"><i class="fa-solid fa-trash-can"></i></button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+
+                const editBtn = tr.querySelector('[data-action="edit"]');
+                const delBtn = tr.querySelector('[data-action="delete"]');
+                if (editBtn) editBtn.addEventListener('click', () => editStudent(s.id));
+                if (delBtn) delBtn.addEventListener('click', () => deleteStudent(s.id, s.name));
+
+                // Populate Attendance Cards
+                const card = document.createElement('div');
+                card.className = 'bg-white dark:bg-dark-card rounded-xl p-6 shadow-sm border border-gray-100 dark:border-dark-border text-center hover:shadow-md transition-all duration-200 transform hover:-translate-y-1';
+                const pClass = (s.today_status === 'Present' || s.today_status === 'ALREADY RECORDED') ? 'bg-green-500 text-white shadow-lg hover:bg-green-600' : 'bg-green-100 text-green-600 hover:bg-green-500 hover:text-white hover:shadow-lg dark:bg-green-900/40 dark:text-green-400';
+                const aClass = s.today_status === 'Absent' ? 'bg-red-500 text-white shadow-lg hover:bg-red-600' : 'bg-red-100 text-red-600 hover:bg-red-500 hover:text-white hover:shadow-lg dark:bg-red-900/40 dark:text-red-400';
+                const lClass = s.today_status === 'Late' ? 'bg-yellow-500 text-white shadow-lg hover:bg-yellow-600' : 'bg-yellow-100 text-yellow-600 hover:bg-yellow-500 hover:text-white hover:shadow-lg dark:bg-yellow-900/40 dark:text-yellow-400';
+
+                card.innerHTML = `
+                    <img src="https://ui-avatars.com/api/?name=${encodeURIComponent(s.name)}&background=random&color=fff&size=64" class="mx-auto rounded-full mb-3 shadow-sm">
+                    <h3 class="font-semibold text-lg text-gray-900 dark:text-white">${escHtml(s.name)}</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-5 font-mono">ID-${escHtml(s.id)}</p>
+                    <div class="flex justify-center gap-3">
+                        <button data-status="Present" class="mark-btn w-10 h-10 rounded-full font-bold transition-all focus:outline-none ${pClass}">P</button>
+                        <button data-status="Absent" class="mark-btn w-10 h-10 rounded-full font-bold transition-all focus:outline-none ${aClass}">A</button>
+                        <button data-status="Late" class="mark-btn w-10 h-10 rounded-full font-bold transition-all focus:outline-none ${lClass}">L</button>
+                    </div>
+                `;
+                attendGrid.appendChild(card);
+
+                card.querySelectorAll('.mark-btn').forEach((btn) => {
+                    btn.addEventListener('click', () => markManual(s.name, btn.dataset.status, btn));
+                });
+            });
         }
 
         // 7. Manual Attendance Post
@@ -1232,6 +1255,22 @@ async function fetchDateStatus(dateStr) {
                     if (matchingBtn && !matchingBtn.classList.contains('active')) {
                         matchingBtn.click();
                     }
+                });
+            }
+
+            // Roll Number sorting click handler
+            const thRollNo = document.getElementById('th-rollno');
+            const rollNoSortIcon = document.getElementById('rollno-sort-icon');
+            if (thRollNo) {
+                thRollNo.addEventListener('click', () => {
+                    if (rollNoSortDirection === 'asc') {
+                        rollNoSortDirection = 'desc';
+                        rollNoSortIcon.innerHTML = '<i class="fa-solid fa-sort-down text-brand-500"></i>';
+                    } else {
+                        rollNoSortDirection = 'asc';
+                        rollNoSortIcon.innerHTML = '<i class="fa-solid fa-sort-up text-brand-500"></i>';
+                    }
+                    renderCachedStudents();
                 });
             }
 
