@@ -1192,17 +1192,176 @@ def api_set_calendar_status():
     return jsonify({'success': True, 'message': f'Set {date_str} as {status}'})
 
 
+def check_sync_conflict(record_uuid, payload):
+    rollno = payload.get('rollno')
+    face_desc_str = payload.get('faceDescriptor')
+    if not face_desc_str:
+        return None, None
+        
+    # 1. Check duplicate rollno
+    if rollno:
+        with db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT uuid FROM students WHERE rollno = ? AND uuid != ? AND is_deleted = 0", (rollno, record_uuid))
+            row = cursor.fetchone()
+            if row:
+                return 'rollno', row[0]
+                
+    # 2. Check biometric duplicate
+    try:
+        incoming_desc = np.array(json.loads(face_desc_str), dtype=np.float64)
+    except Exception:
+        return None, None
+        
+    with known_encodings_lock:
+        local_ids = list(known_ids)
+        local_encodings = list(known_encodings)
+        
+    if local_encodings:
+        index, distance = engine.compare_faces(local_encodings, incoming_desc, threshold=0.6)
+        if index is not None:
+            matched_id = local_ids[index]
+            with db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT uuid FROM students WHERE id = ?", (matched_id,))
+                row = cursor.fetchone()
+                if row and row[0] != record_uuid:
+                    return 'biometric', row[0]
+    return None, None
+
+
+def perform_sync_cycle():
+    global coordinator_url, last_sync_event_id
+    import requests
+    if not coordinator_url:
+        return False, 'No coordinator connected'
+        
+    pushed_count = 0
+    pulled_count = 0
+    try:
+        # 1. PUSH
+        local_events = db_manager.get_sync_events_since(0)
+        if local_events:
+            print(f"[SYNC WORKER] Pushing {len(local_events)} events to coordinator.")
+            resp = requests.post(f"{coordinator_url}/api/sync/push", json={'events': local_events}, timeout=3)
+            if resp.status_code == 200 and resp.json().get('success'):
+                max_id = max(e['id'] for e in local_events)
+                db_manager.clear_sync_events_up_to(max_id)
+                pushed_count = len(local_events)
+                
+        # 2. PULL
+        resp = requests.get(f"{coordinator_url}/api/sync/pull", params={'last_id': last_sync_event_id}, timeout=3)
+        if resp.status_code == 200:
+            pulled_events = resp.json().get('events', [])
+            if pulled_events:
+                print(f"[SYNC WORKER] Pulled {len(pulled_events)} events from coordinator.")
+                students_changed = False
+                for event in pulled_events:
+                    table_name = event.get('table_name')
+                    record_uuid = event.get('record_uuid')
+                    payload = event.get('payload', {})
+                    
+                    if table_name == 'students':
+                        conflict_type, conflicting_uuid = check_sync_conflict(record_uuid, payload)
+                        if conflict_type:
+                            print(f"[SYNC CONFLICT] Conflict detected ({conflict_type}) between {record_uuid} and {conflicting_uuid}")
+                            db_manager.add_sync_conflict(conflict_type, record_uuid, conflicting_uuid)
+                            continue
+                        
+                        existing = db_manager.get_student_by_uuid(record_uuid)
+                        if existing:
+                            incoming_updated = payload.get('updated_at', '')
+                            existing_updated = existing.get('updated_at', '')
+                            if incoming_updated > existing_updated:
+                                db_manager.update_student_by_uuid(
+                                    record_uuid, 
+                                    payload, 
+                                    faceDescriptor=payload.get('faceDescriptor'),
+                                    updated_at=incoming_updated,
+                                    is_deleted=payload.get('is_deleted', 0),
+                                    sync_mode=True
+                                )
+                                students_changed = True
+                        else:
+                            if payload.get('is_deleted', 0) == 0:
+                                faceDescriptor = payload.get('faceDescriptor')
+                                payload['uuid'] = record_uuid
+                                db_manager.add_student(
+                                    payload, 
+                                    faceDescriptor, 
+                                    sync_mode=True
+                                )
+                                students_changed = True
+                                
+                    elif table_name == 'attendance_log':
+                        with db_manager.get_connection() as conn:
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT id FROM attendance_log WHERE uuid = ?", (record_uuid,))
+                            if not cursor.fetchone():
+                                db_manager.log_attendance(
+                                    payload.get('student_name'),
+                                    status=payload.get('status'),
+                                    log_uuid=record_uuid,
+                                    origin_node_id=payload.get('origin_node_id', 'remote'),
+                                    timestamp_str=payload.get('timestamp'),
+                                    sync_mode=True
+                                )
+                                
+                    elif table_name == 'calendar_exceptions':
+                        with db_manager.get_connection() as conn:
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT updated_at FROM calendar_exceptions WHERE uuid = ?", (record_uuid,))
+                            row = cursor.fetchone()
+                        incoming_updated = payload.get('updated_at', '')
+                        if not row:
+                            db_manager.set_calendar_exception(
+                                payload.get('date'),
+                                payload.get('status'),
+                                exception_uuid=record_uuid,
+                                sync_mode=True
+                            )
+                        else:
+                            existing_updated = row[0]
+                            if incoming_updated > existing_updated:
+                                db_manager.set_calendar_exception(
+                                    payload.get('date'),
+                                    payload.get('status'),
+                                    exception_uuid=record_uuid,
+                                    sync_mode=True
+                                )
+                if students_changed:
+                    reload_known_encodings()
+                last_sync_event_id = max(e['id'] for e in pulled_events)
+                pulled_count = len(pulled_events)
+        return True, f"Synchronized successfully: pushed {pushed_count}, pulled {pulled_count}."
+    except Exception as e:
+        print(f"[SYNC WORKER ERROR] {e}")
+        return False, str(e)
+
+
+def sync_worker_loop():
+    print("[SYNC WORKER] Thread started.")
+    while True:
+        if coordinator_url:
+            perform_sync_cycle()
+        time.sleep(5)
+
+
 @app.route('/api/sync/push', methods=['POST'])
 def api_sync_push():
     events = request.json.get('events', [])
     students_changed = False
     for event in events:
-        event_type = event.get('event_type')
         table_name = event.get('table_name')
         record_uuid = event.get('record_uuid')
         payload = event.get('payload', {})
         
         if table_name == 'students':
+            conflict_type, conflicting_uuid = check_sync_conflict(record_uuid, payload)
+            if conflict_type:
+                db_manager.add_sync_conflict(conflict_type, record_uuid, conflicting_uuid)
+                continue
+                
             existing = db_manager.get_student_by_uuid(record_uuid)
             if existing:
                 incoming_updated = payload.get('updated_at', '')
@@ -1213,7 +1372,8 @@ def api_sync_push():
                         payload, 
                         faceDescriptor=payload.get('faceDescriptor'),
                         updated_at=incoming_updated,
-                        is_deleted=payload.get('is_deleted', 0)
+                        is_deleted=payload.get('is_deleted', 0),
+                        sync_mode=False
                     )
                     students_changed = True
             else:
@@ -1223,16 +1383,15 @@ def api_sync_push():
                     db_manager.add_student(
                         payload, 
                         faceDescriptor, 
-                        sync_mode=True
+                        sync_mode=False
                     )
                     students_changed = True
-                        
+                    
         elif table_name == 'attendance_log':
             with db_manager.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT id FROM attendance_log WHERE uuid = ?", (record_uuid,))
-                exists = cursor.fetchone()
-                if not exists:
+                if not cursor.fetchone():
                     db_manager.log_attendance(
                         payload.get('student_name'),
                         status=payload.get('status'),
@@ -1247,7 +1406,6 @@ def api_sync_push():
                 cursor = conn.cursor()
                 cursor.execute("SELECT updated_at FROM calendar_exceptions WHERE uuid = ?", (record_uuid,))
                 row = cursor.fetchone()
-                
             incoming_updated = payload.get('updated_at', '')
             if not row:
                 db_manager.set_calendar_exception(
@@ -1268,7 +1426,6 @@ def api_sync_push():
                     
     if students_changed:
         reload_known_encodings()
-        
     return jsonify({'success': True})
 
 
@@ -1279,105 +1436,33 @@ def api_sync_pull():
     return jsonify({'events': events})
 
 
-def sync_worker_loop():
-    global coordinator_url, last_sync_event_id
-    import requests
-    print("[SYNC WORKER] Thread started.")
-    while True:
-        if coordinator_url:
-            try:
-                # 1. PUSH local sync queue events to coordinator
-                local_events = db_manager.get_sync_events_since(0)
-                if local_events:
-                    print(f"[SYNC WORKER] Pushing {len(local_events)} events to coordinator.")
-                    resp = requests.post(f"{coordinator_url}/api/sync/push", json={'events': local_events}, timeout=3)
-                    if resp.status_code == 200 and resp.json().get('success'):
-                        max_local_id = max(e['id'] for e in local_events)
-                        db_manager.clear_sync_events_up_to(max_local_id)
-                
-                # 2. PULL new events from coordinator
-                resp = requests.get(f"{coordinator_url}/api/sync/pull", params={'last_id': last_sync_event_id}, timeout=3)
-                if resp.status_code == 200:
-                    pulled_events = resp.json().get('events', [])
-                    if pulled_events:
-                        print(f"[SYNC WORKER] Pulled {len(pulled_events)} events from coordinator.")
-                        students_changed = False
-                        for event in pulled_events:
-                            event_type = event.get('event_type')
-                            table_name = event.get('table_name')
-                            record_uuid = event.get('record_uuid')
-                            payload = event.get('payload', {})
-                            
-                            if table_name == 'students':
-                                existing = db_manager.get_student_by_uuid(record_uuid)
-                                if existing:
-                                    incoming_updated = payload.get('updated_at', '')
-                                    existing_updated = existing.get('updated_at', '')
-                                    if incoming_updated > existing_updated:
-                                        db_manager.update_student_by_uuid(
-                                            record_uuid, 
-                                            payload, 
-                                            faceDescriptor=payload.get('faceDescriptor'),
-                                            updated_at=incoming_updated,
-                                            is_deleted=payload.get('is_deleted', 0)
-                                        )
-                                        students_changed = True
-                                else:
-                                    if payload.get('is_deleted', 0) == 0:
-                                        faceDescriptor = payload.get('faceDescriptor')
-                                        payload['uuid'] = record_uuid
-                                        db_manager.add_student(
-                                            payload, 
-                                            faceDescriptor, 
-                                            sync_mode=True
-                                        )
-                                        students_changed = True
-                                            
-                            elif table_name == 'attendance_log':
-                                with db_manager.get_connection() as conn:
-                                    cursor = conn.cursor()
-                                    cursor.execute("SELECT id FROM attendance_log WHERE uuid = ?", (record_uuid,))
-                                    exists = cursor.fetchone()
-                                    if not exists:
-                                        db_manager.log_attendance(
-                                            payload.get('student_name'),
-                                            status=payload.get('status'),
-                                            log_uuid=record_uuid,
-                                            origin_node_id=payload.get('origin_node_id', 'remote'),
-                                            timestamp_str=payload.get('timestamp'),
-                                            sync_mode=True
-                                        )
-                                        
-                            elif table_name == 'calendar_exceptions':
-                                with db_manager.get_connection() as conn:
-                                    cursor = conn.cursor()
-                                    cursor.execute("SELECT updated_at FROM calendar_exceptions WHERE uuid = ?", (record_uuid,))
-                                    row = cursor.fetchone()
-                                incoming_updated = payload.get('updated_at', '')
-                                if not row:
-                                    db_manager.set_calendar_exception(
-                                        payload.get('date'),
-                                        payload.get('status'),
-                                        exception_uuid=record_uuid,
-                                        sync_mode=True
-                                    )
-                                else:
-                                    existing_updated = row[0]
-                                    if incoming_updated > existing_updated:
-                                        db_manager.set_calendar_exception(
-                                            payload.get('date'),
-                                            payload.get('status'),
-                                            exception_uuid=record_uuid,
-                                            sync_mode=True
-                                        )
-                        
-                        if students_changed:
-                            reload_known_encodings()
-                            
-                        last_sync_event_id = max(e['id'] for e in pulled_events)
-            except Exception as e:
-                print(f"[SYNC WORKER ERROR] {e}")
-        time.sleep(5)
+@app.route('/api/sync/conflicts')
+def api_sync_conflicts():
+    conflicts = db_manager.get_unresolved_conflicts()
+    return jsonify({'conflicts': conflicts})
+
+
+@app.route('/api/sync/conflicts/resolve', methods=['POST'])
+def api_resolve_conflict():
+    data = request.json or {}
+    conflict_id = data.get('conflict_id')
+    resolution = data.get('resolution')
+    if not conflict_id or not resolution:
+        return jsonify({'error': 'Missing conflict_id or resolution'}), 400
+        
+    success = db_manager.resolve_conflict(conflict_id, resolution)
+    if success:
+        reload_known_encodings()
+        return jsonify({'success': True, 'message': 'Conflict resolved successfully.'})
+    return jsonify({'error': 'Conflict not found'}), 404
+
+
+@app.route('/api/network/sync_now', methods=['POST'])
+def api_network_sync_now():
+    success, msg = perform_sync_cycle()
+    if success:
+        return jsonify({'success': True, 'message': msg})
+    return jsonify({'error': msg}), 400
 
 
 def get_local_ip():
@@ -1554,13 +1639,15 @@ def api_network_handshake():
 @app.route('/api/network/status')
 def api_network_status():
     local_ip = get_local_ip()
+    pending_count = db_manager.get_pending_sync_count()
     return jsonify({
         'node_id': node_id,
         'local_ip': local_ip,
         'coordinator_url': coordinator_url,
         'is_hosting': is_hosting_sync,
         'hosting_pin': hosting_pin,
-        'connected_clients': list(connected_nodes.values()) if is_hosting_sync else []
+        'connected_clients': list(connected_nodes.values()) if is_hosting_sync else [],
+        'pending_count': pending_count
     })
 
 

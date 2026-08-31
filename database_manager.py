@@ -115,6 +115,17 @@ class DatabaseManager:
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            # Sync Conflicts table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS sync_conflicts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conflict_type TEXT NOT NULL,
+                    student_a_uuid TEXT NOT NULL,
+                    student_b_uuid TEXT NOT NULL,
+                    resolved INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             conn.commit()
 
             # Backfill UUIDs and timestamps for existing student records
@@ -500,7 +511,7 @@ class DatabaseManager:
                 }
             return None
 
-    def update_student_by_uuid(self, student_uuid, student_data, faceDescriptor=None, updated_at=None, is_deleted=0):
+    def update_student_by_uuid(self, student_uuid, student_data, faceDescriptor=None, updated_at=None, is_deleted=0, sync_mode=False):
         from datetime import datetime
         if not updated_at:
             updated_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
@@ -512,6 +523,11 @@ class DatabaseManager:
                     SET is_deleted = 1, updated_at = ? 
                     WHERE uuid = ?
                 ''', (updated_at, student_uuid))
+                if not sync_mode:
+                    self._log_sync_event(cursor, 'DELETE', 'students', student_uuid, {
+                        'updated_at': updated_at,
+                        'is_deleted': 1
+                    })
                 conn.commit()
                 return True
             rollno = str(student_data.get('rollno') or '')
@@ -541,6 +557,19 @@ class DatabaseManager:
                     updated_at, 
                     student_uuid
                 ))
+            
+            if not sync_mode:
+                self._log_sync_event(cursor, 'UPDATE', 'students', student_uuid, {
+                    'name': student_data.get('name'),
+                    'rollno': rollno,
+                    'dept': student_data.get('dept'),
+                    'year': student_data.get('year'),
+                    'email': student_data.get('email'),
+                    'contact': contact,
+                    'faceDescriptor': faceDescriptor or student_data.get('faceDescriptor'),
+                    'updated_at': updated_at,
+                    'is_deleted': is_deleted
+                })
             conn.commit()
             return cursor.rowcount > 0
 
@@ -571,3 +600,68 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM sync_queue WHERE id <= ?", (event_id,))
             conn.commit()
+
+    def add_sync_conflict(self, conflict_type, uuid_a, uuid_b):
+        if uuid_a > uuid_b:
+            uuid_a, uuid_b = uuid_b, uuid_a
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id FROM sync_conflicts 
+                WHERE student_a_uuid = ? AND student_b_uuid = ? AND resolved = 0
+            ''', (uuid_a, uuid_b))
+            if not cursor.fetchone():
+                cursor.execute('''
+                    INSERT INTO sync_conflicts (conflict_type, student_a_uuid, student_b_uuid, resolved)
+                    VALUES (?, ?, ?, 0)
+                ''', (conflict_type, uuid_a, uuid_b))
+                conn.commit()
+
+    def get_unresolved_conflicts(self):
+        conflicts = []
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, conflict_type, student_a_uuid, student_b_uuid 
+                FROM sync_conflicts 
+                WHERE resolved = 0
+            ''')
+            rows = cursor.fetchall()
+            for cid, ctype, uuid_a, uuid_b in rows:
+                student_a = self.get_student_by_uuid(uuid_a)
+                student_b = self.get_student_by_uuid(uuid_b)
+                if student_a and student_b:
+                    conflicts.append({
+                        'id': cid,
+                        'conflict_type': ctype,
+                        'student_a': student_a,
+                        'student_b': student_b
+                    })
+        return conflicts
+
+    def resolve_conflict(self, conflict_id, resolution):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT student_a_uuid, student_b_uuid FROM sync_conflicts WHERE id = ?', (conflict_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False
+            uuid_a, uuid_b = row
+            cursor.execute('UPDATE sync_conflicts SET resolved = 1 WHERE id = ?', (conflict_id,))
+            conn.commit()
+            
+        if resolution == 'keep_a':
+            student_b = self.get_student_by_uuid(uuid_b)
+            if student_b:
+                self.delete_student(student_b['id'])
+        elif resolution == 'keep_b':
+            student_a = self.get_student_by_uuid(uuid_a)
+            if student_a:
+                self.delete_student(student_a['id'])
+        return True
+
+    def get_pending_sync_count(self):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM sync_queue')
+            return cursor.fetchone()[0]
