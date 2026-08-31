@@ -12,8 +12,9 @@ Attendify is a state-of-the-art web-based student attendance system that leverag
 - **Day Type & Holiday Control**: A calendar control widget in the top-right header of the dashboard allows users to mark any day as a **Working Day** or a **Holiday**. Recalculates stats and student attendance percentages instantly.
 - **Sunday Default Logic**: Sundays are automatically flagged as holidays to maintain accurate attendance percentages, with the ability to override them manually to working days.
 - **Interactive Data Visualization**: Dynamic doughnut and weekly stacked bar charts powered by Chart.js that update in real time.
-- **Manual Attendance Overrides**: One-click toggle buttons to manually mark a student as **Present**, **Absent**, or **Late** (with automatic Late designation for sign-ins after 9:00 AM).
-- **Filtered PDF Reports**: Instantly export custom attendance reports to PDF, filtered by date range, department, and year level.
+- **Manual Attendance Overrides**: One-click toggle buttons to manually mark a student as **Present**, **Absent**, or **Late** (with automatic Late designation for sign-ins after 9:15 AM).
+- **Fixed Department Configuration**: The system is configured for a single department, **Information Technology**, which is set by default and cannot be modified through the interface.
+- **Filtered PDF Reports**: Instantly export custom attendance reports to PDF, filtered by date range and year level for the Information Technology department.
 - **Sleek Light/Dark Mode**: High-fidelity modern UI styling using Tailwind CSS with glassmorphic elements and seamless transition effects.
 
 ---
