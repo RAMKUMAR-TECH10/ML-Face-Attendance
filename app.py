@@ -1581,4 +1581,4 @@ if __name__ == '__main__':
     sync_thread = threading.Thread(target=sync_worker_loop, daemon=True)
     sync_thread.start()
     
-    app.run(debug=True, port=5000, threaded=True)
+    app.run(host='0.0.0.0', debug=True, port=5000, threaded=True)
