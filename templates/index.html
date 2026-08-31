@@ -2148,6 +2148,14 @@ async function fetchDateStatus(dateStr) {
             // Fetch loop every 2 seconds for stats and recent scans (real-time updates)
             setInterval(updateStats, 2000);
             setInterval(fetchRecentList, 2000);
+
+            // Refresh student list every 10 seconds to keep sync UI accurate
+            setInterval(() => {
+                const viewStudents = document.getElementById('view-students');
+                if (viewStudents && !viewStudents.classList.contains('hidden')) {
+                    loadStudents();
+                }
+            }, 10000);
         });
     </script>
 </body>

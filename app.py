@@ -1231,7 +1231,10 @@ def check_sync_conflict(record_uuid, payload):
 
 
 def perform_sync_cycle():
-    global coordinator_url, last_sync_event_id
+    global coordinator_url, last_sync_event_id, is_hosting_sync
+    if is_hosting_sync:
+        return True, "Coordinator active. Local database is source of truth."
+        
     import requests
     if not coordinator_url:
         return False, 'No coordinator connected'
