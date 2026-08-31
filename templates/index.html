@@ -649,7 +649,7 @@
             todayChart = new Chart(ctx1, {
                 type: 'doughnut',
                 data: {
-                    labels: ['Present', 'Absent', 'Late'],
+                    labels: ['On-Time', 'Absent', 'Late'],
                     datasets: [{
                         data: [0, 0, 0], 
                         backgroundColor: [chartColors.present, chartColors.absent, chartColors.late],
@@ -673,7 +673,7 @@
                 data: {
                     labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
                     datasets: [
-                        { label: 'Present', data: [85, 90, 88, 92, 0], backgroundColor: chartColors.present, borderRadius: 4 },
+                        { label: 'On-Time', data: [85, 90, 88, 92, 0], backgroundColor: chartColors.present, borderRadius: 4 },
                         { label: 'Absent', data: [10, 5, 8, 3, 0], backgroundColor: chartColors.absent, borderRadius: 4 },
                         { label: 'Late', data: [5, 5, 4, 5, 0], backgroundColor: chartColors.late, borderRadius: 4 }
                     ]
@@ -774,7 +774,8 @@
 
                     // Update Charts dynamically
                     if(todayChart) {
-                        todayChart.data.datasets[0].data = [present, absent, late];
+                        const onTimePresent = Math.max(present - late, 0);
+                        todayChart.data.datasets[0].data = [onTimePresent, absent, late];
                         todayChart.update();
                     }
                 })

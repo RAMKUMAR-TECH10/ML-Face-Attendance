@@ -757,8 +757,10 @@ def api_stats():
         elif status == 'Present':
             present += 1
 
-    absent = max(total - present - late, 0)
-    return jsonify({'total': total, 'present': present, 'absent': absent, 'late': late})
+    # Include late in the present category for total counts
+    total_present = present + late
+    absent = max(total - total_present, 0)
+    return jsonify({'total': total, 'present': total_present, 'absent': absent, 'late': late})
 
 @app.route('/api/stats/weekly')
 def api_stats_weekly():
