@@ -15,6 +15,7 @@ class DatabaseManager:
         return sqlite3.connect(self.db_path)
 
     def init_db(self):
+        import uuid
         with self.get_connection() as conn:
             cursor = conn.cursor()
             # Students table with expanded schema
@@ -60,10 +61,78 @@ class DatabaseManager:
                     cursor.execute(f"ALTER TABLE students ADD COLUMN {col_name} {col_type}")
                 except sqlite3.OperationalError:
                     pass # Column already exists
-                    
+            
+            # Sync Metadata migrations for students
+            sync_columns_students = [
+                ('uuid', 'TEXT'),
+                ('updated_at', 'TEXT'),
+                ('is_deleted', 'INTEGER DEFAULT 0')
+            ]
+            for col_name, col_type in sync_columns_students:
+                try:
+                    cursor.execute(f"ALTER TABLE students ADD COLUMN {col_name} {col_type}")
+                except sqlite3.OperationalError:
+                    pass
+
+            # Sync Metadata migrations for attendance logs
+            sync_columns_attendance = [
+                ('uuid', 'TEXT'),
+                ('origin_node_id', 'TEXT'),
+                ('is_deleted', 'INTEGER DEFAULT 0')
+            ]
+            for col_name, col_type in sync_columns_attendance:
+                try:
+                    cursor.execute(f"ALTER TABLE attendance_log ADD COLUMN {col_name} {col_type}")
+                except sqlite3.OperationalError:
+                    pass
+
+            # Sync Metadata migrations for calendar exceptions
+            sync_columns_calendar = [
+                ('uuid', 'TEXT'),
+                ('updated_at', 'TEXT'),
+                ('is_deleted', 'INTEGER DEFAULT 0')
+            ]
+            for col_name, col_type in sync_columns_calendar:
+                try:
+                    cursor.execute(f"ALTER TABLE calendar_exceptions ADD COLUMN {col_name} {col_type}")
+                except sqlite3.OperationalError:
+                    pass
+
+            # Sync Queue table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS sync_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    table_name TEXT NOT NULL,
+                    record_uuid TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            conn.commit()
+
+            # Backfill UUIDs and timestamps for existing student records
+            cursor.execute("SELECT id FROM students WHERE uuid IS NULL OR uuid = ''")
+            for (row_id,) in cursor.fetchall():
+                new_uuid = str(uuid.uuid4())
+                cursor.execute("UPDATE students SET uuid = ?, updated_at = datetime('now') WHERE id = ?", (new_uuid, row_id))
+
+            # Backfill UUIDs and node ids for existing attendance logs
+            cursor.execute("SELECT id FROM attendance_log WHERE uuid IS NULL OR uuid = ''")
+            for (row_id,) in cursor.fetchall():
+                new_uuid = str(uuid.uuid4())
+                cursor.execute("UPDATE attendance_log SET uuid = ?, origin_node_id = 'local' WHERE id = ?", (new_uuid, row_id))
+
+            # Backfill UUIDs and timestamps for existing calendar exceptions
+            cursor.execute("SELECT date FROM calendar_exceptions WHERE uuid IS NULL OR uuid = ''")
+            for (date_val,) in cursor.fetchall():
+                new_uuid = str(uuid.uuid4())
+                cursor.execute("UPDATE calendar_exceptions SET uuid = ?, updated_at = datetime('now') WHERE date = ?", (new_uuid, date_val))
             conn.commit()
 
     def add_student(self, student_data, faceDescriptor):
+        import uuid
+        from datetime import datetime
         # Convert descriptor to JSON string — use .tolist() for clean float serialization
         if isinstance(faceDescriptor, np.ndarray):
             faceDescriptor = json.dumps(faceDescriptor.tolist())
@@ -75,9 +144,10 @@ class DatabaseManager:
             # Cast rollno and contact to strings to prevent SQLite type mismatches
             rollno = str(student_data.get('rollno') or '')
             contact = str(student_data.get('contact') or '')
+            student_uuid = student_data.get('uuid') or str(uuid.uuid4())
             cursor.execute('''
-                INSERT INTO students (name, rollno, dept, year, email, contact, faceDescriptor) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO students (name, rollno, dept, year, email, contact, faceDescriptor, uuid, updated_at, is_deleted) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ''', (
                 student_data.get('name'),
                 rollno,
@@ -85,12 +155,15 @@ class DatabaseManager:
                 student_data.get('year'),
                 student_data.get('email'),
                 contact,
-                faceDescriptor
+                faceDescriptor,
+                student_uuid,
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ))
             conn.commit()
             return cursor.lastrowid
 
     def update_student(self, student_id, student_data, faceDescriptor=None):
+        from datetime import datetime
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
@@ -99,7 +172,7 @@ class DatabaseManager:
             contact = str(student_data.get('contact') or '')
             cursor.execute('''
                 UPDATE students 
-                SET name = ?, rollno = ?, dept = ?, year = ?, email = ?, contact = ?
+                SET name = ?, rollno = ?, dept = ?, year = ?, email = ?, contact = ?, updated_at = ?
                 WHERE id = ?
             ''', (
                 student_data.get('name'),
@@ -108,6 +181,7 @@ class DatabaseManager:
                 student_data.get('year'),
                 student_data.get('email'),
                 contact,
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 student_id
             ))
             
@@ -117,7 +191,11 @@ class DatabaseManager:
                     faceDescriptor = json.dumps(faceDescriptor.tolist())
                 elif isinstance(faceDescriptor, list):
                     faceDescriptor = json.dumps(faceDescriptor)
-                cursor.execute("UPDATE students SET faceDescriptor = ? WHERE id = ?", (faceDescriptor, student_id))
+                cursor.execute("UPDATE students SET faceDescriptor = ? , updated_at = ? WHERE id = ?", (
+                    faceDescriptor, 
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 
+                    student_id
+                ))
             
             conn.commit()
             return cursor.rowcount > 0
@@ -127,16 +205,16 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             if year:
-                cursor.execute("SELECT id, name, rollno, dept, year, email, contact, faceDescriptor FROM students WHERE year = ?", (year,))
+                cursor.execute("SELECT id, name, rollno, dept, year, email, contact, faceDescriptor FROM students WHERE year = ? AND is_deleted = 0", (year,))
             else:
-                cursor.execute("SELECT id, name, rollno, dept, year, email, contact, faceDescriptor FROM students")
+                cursor.execute("SELECT id, name, rollno, dept, year, email, contact, faceDescriptor FROM students WHERE is_deleted = 0")
             rows = cursor.fetchall()
             
             # Recalculate attendance percentages
             # 1. Get calendar exceptions
             exceptions = {}
             try:
-                cursor.execute("SELECT date, status FROM calendar_exceptions")
+                cursor.execute("SELECT date, status FROM calendar_exceptions WHERE is_deleted = 0")
                 for d, s in cursor.fetchall():
                     exceptions[d] = s
             except sqlite3.OperationalError:
@@ -145,7 +223,7 @@ class DatabaseManager:
             # 2. Get range of dates
             start_date = None
             try:
-                cursor.execute("SELECT MIN(date(timestamp)) FROM attendance_log")
+                cursor.execute("SELECT MIN(date(timestamp)) FROM attendance_log WHERE is_deleted = 0")
                 min_log_date_str = cursor.fetchone()[0]
             except:
                 min_log_date_str = None
@@ -186,7 +264,7 @@ class DatabaseManager:
                 cursor.execute('''
                     SELECT student_name, date(timestamp) 
                     FROM attendance_log 
-                    WHERE status IN ('Present', 'Late')
+                    WHERE status IN ('Present', 'Late') AND is_deleted = 0
                 ''')
                 student_present_days = {}
                 for name, date_str in cursor.fetchall():
@@ -238,7 +316,7 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT COUNT(*) FROM students 
-                WHERE email = ? OR contact = ?
+                WHERE (email = ? OR contact = ?) AND is_deleted = 0
             ''', (contact_info, contact_info))
             count = cursor.fetchone()[0]
             return count > 0
@@ -246,7 +324,7 @@ class DatabaseManager:
     def get_student_by_id(self, student_id):
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, name, rollno, dept, year, email, contact, faceDescriptor FROM students WHERE id = ?", (student_id,))
+            cursor.execute("SELECT id, name, rollno, dept, year, email, contact, faceDescriptor FROM students WHERE id = ? AND is_deleted = 0", (student_id,))
             row = cursor.fetchone()
             if row:
                 sid, name, rollno, dept, year, email, contact, descriptor_str = row
@@ -262,23 +340,34 @@ class DatabaseManager:
                 }
             return None
 
-    def log_attendance(self, student_name, status='Present'):
+    def log_attendance(self, student_name, status='Present', log_uuid=None, origin_node_id='local'):
+        import uuid
+        if not log_uuid:
+            log_uuid = str(uuid.uuid4())
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("INSERT INTO attendance_log (student_name, status) VALUES (?, ?)", (student_name, status))
+            cursor.execute('''
+                INSERT INTO attendance_log (student_name, status, uuid, origin_node_id, is_deleted) 
+                VALUES (?, ?, ?, ?, 0)
+            ''', (student_name, status, log_uuid, origin_node_id))
             conn.commit()
 
     def get_last_attendance(self, student_name):
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT timestamp FROM attendance_log WHERE student_name = ? ORDER BY timestamp DESC LIMIT 1", (student_name,))
+            cursor.execute("SELECT timestamp FROM attendance_log WHERE student_name = ? AND is_deleted = 0 ORDER BY timestamp DESC LIMIT 1", (student_name,))
             result = cursor.fetchone()
             return result[0] if result else None
 
     def delete_student(self, student_id):
+        from datetime import datetime
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM students WHERE id = ?", (student_id,))
+            cursor.execute('''
+                UPDATE students 
+                SET is_deleted = 1, updated_at = ? 
+                WHERE id = ?
+            ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), student_id))
             conn.commit()
             return cursor.rowcount > 0
 
@@ -286,7 +375,7 @@ class DatabaseManager:
         from datetime import datetime
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT status FROM calendar_exceptions WHERE date = ?", (date_str,))
+            cursor.execute("SELECT status FROM calendar_exceptions WHERE date = ? AND is_deleted = 0", (date_str,))
             row = cursor.fetchone()
             if row:
                 return (row[0], False) if return_default else row[0]
@@ -298,8 +387,15 @@ class DatabaseManager:
                 default_status = "Working"
                 return (default_status, True) if return_default else default_status
 
-    def set_calendar_exception(self, date_str, status):
+    def set_calendar_exception(self, date_str, status, exception_uuid=None):
+        import uuid
+        from datetime import datetime
+        if not exception_uuid:
+            exception_uuid = str(uuid.uuid4())
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("INSERT OR REPLACE INTO calendar_exceptions (date, status) VALUES (?, ?)", (date_str, status))
+            cursor.execute('''
+                INSERT OR REPLACE INTO calendar_exceptions (date, status, uuid, updated_at, is_deleted) 
+                VALUES (?, ?, ?, ?, 0)
+            ''', (date_str, status, exception_uuid, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             conn.commit()
