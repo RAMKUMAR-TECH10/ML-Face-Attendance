@@ -136,7 +136,7 @@ class DatabaseManager:
                 cursor.execute("UPDATE calendar_exceptions SET uuid = ?, updated_at = datetime('now') WHERE date = ?", (new_uuid, date_val))
             conn.commit()
 
-    def add_student(self, student_data, faceDescriptor):
+    def add_student(self, student_data, faceDescriptor, sync_mode=False):
         import uuid
         from datetime import datetime
         # Convert descriptor to JSON string — use .tolist() for clean float serialization
@@ -151,7 +151,7 @@ class DatabaseManager:
             rollno = str(student_data.get('rollno') or '')
             contact = str(student_data.get('contact') or '')
             student_uuid = student_data.get('uuid') or str(uuid.uuid4())
-            updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            updated_at = student_data.get('updated_at') if (sync_mode and student_data.get('updated_at')) else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute('''
                 INSERT INTO students (name, rollno, dept, year, email, contact, faceDescriptor, uuid, updated_at, is_deleted) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
@@ -168,22 +168,23 @@ class DatabaseManager:
             ))
             
             # Log sync event
-            self._log_sync_event(cursor, 'INSERT', 'students', student_uuid, {
-                'name': student_data.get('name'),
-                'rollno': rollno,
-                'dept': student_data.get('dept'),
-                'year': student_data.get('year'),
-                'email': student_data.get('email'),
-                'contact': contact,
-                'faceDescriptor': faceDescriptor,
-                'updated_at': updated_at,
-                'is_deleted': 0
-            })
+            if not sync_mode:
+                self._log_sync_event(cursor, 'INSERT', 'students', student_uuid, {
+                    'name': student_data.get('name'),
+                    'rollno': rollno,
+                    'dept': student_data.get('dept'),
+                    'year': student_data.get('year'),
+                    'email': student_data.get('email'),
+                    'contact': contact,
+                    'faceDescriptor': faceDescriptor,
+                    'updated_at': updated_at,
+                    'is_deleted': 0
+                })
             
             conn.commit()
             return cursor.lastrowid
 
-    def update_student(self, student_id, student_data, faceDescriptor=None):
+    def update_student(self, student_id, student_data, faceDescriptor=None, sync_mode=False):
         from datetime import datetime
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -195,10 +196,9 @@ class DatabaseManager:
                 return False
             student_uuid, existing_descriptor = row
             
-            # Update core fields — cast rollno/contact to strings
             rollno = str(student_data.get('rollno') or '')
             contact = str(student_data.get('contact') or '')
-            updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            updated_at = student_data.get('updated_at') if student_data.get('updated_at') else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute('''
                 UPDATE students 
                 SET name = ?, rollno = ?, dept = ?, year = ?, email = ?, contact = ?, updated_at = ?
@@ -229,15 +229,16 @@ class DatabaseManager:
                 final_descriptor = faceDescriptor
             
             # Log sync event
-            self._log_sync_event(cursor, 'UPDATE', 'students', student_uuid, {
-                'name': student_data.get('name'),
-                'rollno': rollno,
-                'dept': student_data.get('dept'),
-                'year': student_data.get('year'),
-                'email': student_data.get('email'),
-                'contact': contact,
-                'faceDescriptor': final_descriptor,
-                'updated_at': updated_at,
+            if not sync_mode:
+                self._log_sync_event(cursor, 'UPDATE', 'students', student_uuid, {
+                    'name': student_data.get('name'),
+                    'rollno': rollno,
+                    'dept': student_data.get('dept'),
+                    'year': student_data.get('year'),
+                    'email': student_data.get('email'),
+                    'contact': contact,
+                    'faceDescriptor': final_descriptor,
+                    'updated_at': updated_at,
                 'is_deleted': 0
             })
             
@@ -384,16 +385,28 @@ class DatabaseManager:
                 }
             return None
 
-    def log_attendance(self, student_name, status='Present', log_uuid=None, origin_node_id='local'):
+    def log_attendance(self, student_name, status='Present', log_uuid=None, origin_node_id='local', timestamp_str=None, sync_mode=False):
         import uuid
+        from datetime import datetime
         if not log_uuid:
             log_uuid = str(uuid.uuid4())
+        if not timestamp_str:
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO attendance_log (student_name, status, uuid, origin_node_id, is_deleted) 
-                VALUES (?, ?, ?, ?, 0)
-            ''', (student_name, status, log_uuid, origin_node_id))
+                INSERT INTO attendance_log (student_name, status, uuid, origin_node_id, timestamp, is_deleted) 
+                VALUES (?, ?, ?, ?, ?, 0)
+            ''', (student_name, status, log_uuid, origin_node_id, timestamp_str))
+            
+            if not sync_mode:
+                self._log_sync_event(cursor, 'INSERT', 'attendance_log', log_uuid, {
+                    'student_name': student_name,
+                    'status': status,
+                    'timestamp': timestamp_str,
+                    'origin_node_id': origin_node_id,
+                    'is_deleted': 0
+                })
             conn.commit()
 
     def get_last_attendance(self, student_name):
@@ -403,15 +416,28 @@ class DatabaseManager:
             result = cursor.fetchone()
             return result[0] if result else None
 
-    def delete_student(self, student_id):
+    def delete_student(self, student_id, sync_mode=False):
         from datetime import datetime
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute("SELECT uuid FROM students WHERE id = ?", (student_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False
+            student_uuid = row[0]
+            
+            updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute('''
                 UPDATE students 
                 SET is_deleted = 1, updated_at = ? 
                 WHERE id = ?
-            ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), student_id))
+            ''', (updated_at, student_id))
+            
+            if not sync_mode:
+                self._log_sync_event(cursor, 'DELETE', 'students', student_uuid, {
+                    'updated_at': updated_at,
+                    'is_deleted': 1
+                })
             conn.commit()
             return cursor.rowcount > 0
 
@@ -431,15 +457,117 @@ class DatabaseManager:
                 default_status = "Working"
                 return (default_status, True) if return_default else default_status
 
-    def set_calendar_exception(self, date_str, status, exception_uuid=None):
+    def set_calendar_exception(self, date_str, status, exception_uuid=None, sync_mode=False):
         import uuid
         from datetime import datetime
         if not exception_uuid:
             exception_uuid = str(uuid.uuid4())
+        updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO calendar_exceptions (date, status, uuid, updated_at, is_deleted) 
                 VALUES (?, ?, ?, ?, 0)
-            ''', (date_str, status, exception_uuid, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+            ''', (date_str, status, exception_uuid, updated_at))
+            
+            if not sync_mode:
+                self._log_sync_event(cursor, 'INSERT', 'calendar_exceptions', exception_uuid, {
+                    'date': date_str,
+                    'status': status,
+                    'updated_at': updated_at,
+                    'is_deleted': 0
+                })
+            conn.commit()
+
+    def get_student_by_uuid(self, student_uuid):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name, rollno, dept, year, email, contact, faceDescriptor, is_deleted, updated_at FROM students WHERE uuid = ?", (student_uuid,))
+            row = cursor.fetchone()
+            if row:
+                sid, name, rollno, dept, year, email, contact, descriptor_str, is_deleted, updated_at = row
+                return {
+                    'id': sid,
+                    'name': name,
+                    'rollno': rollno,
+                    'dept': dept,
+                    'year': year,
+                    'email': email,
+                    'contact': contact,
+                    'descriptor_str': descriptor_str,
+                    'is_deleted': is_deleted,
+                    'updated_at': updated_at
+                }
+            return None
+
+    def update_student_by_uuid(self, student_uuid, student_data, faceDescriptor=None, updated_at=None, is_deleted=0):
+        from datetime import datetime
+        if not updated_at:
+            updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if is_deleted == 1 or student_data.get('is_deleted', 0) == 1:
+                cursor.execute('''
+                    UPDATE students 
+                    SET is_deleted = 1, updated_at = ? 
+                    WHERE uuid = ?
+                ''', (updated_at, student_uuid))
+                conn.commit()
+                return True
+            rollno = str(student_data.get('rollno') or '')
+            contact = str(student_data.get('contact') or '')
+            cursor.execute('''
+                UPDATE students 
+                SET name = ?, rollno = ?, dept = ?, year = ?, email = ?, contact = ?, updated_at = ?, is_deleted = ?
+                WHERE uuid = ?
+            ''', (
+                student_data.get('name'),
+                rollno,
+                student_data.get('dept'),
+                student_data.get('year'),
+                student_data.get('email'),
+                contact,
+                updated_at,
+                is_deleted,
+                student_uuid
+            ))
+            if faceDescriptor is not None:
+                if isinstance(faceDescriptor, np.ndarray):
+                    faceDescriptor = json.dumps(faceDescriptor.tolist())
+                elif isinstance(faceDescriptor, list):
+                    faceDescriptor = json.dumps(faceDescriptor)
+                cursor.execute("UPDATE students SET faceDescriptor = ?, updated_at = ? WHERE uuid = ?", (
+                    faceDescriptor, 
+                    updated_at, 
+                    student_uuid
+                ))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_sync_events_since(self, last_id):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, event_type, table_name, record_uuid, payload, created_at 
+                FROM sync_queue 
+                WHERE id > ? 
+                ORDER BY id ASC
+            ''', (last_id,))
+            rows = cursor.fetchall()
+            events = []
+            for row in rows:
+                events.append({
+                    'id': row[0],
+                    'event_type': row[1],
+                    'table_name': row[2],
+                    'record_uuid': row[3],
+                    'payload': json.loads(row[4]),
+                    'created_at': row[5]
+                })
+            return events
+
+    def clear_sync_events_up_to(self, event_id):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM sync_queue WHERE id <= ?", (event_id,))
             conn.commit()

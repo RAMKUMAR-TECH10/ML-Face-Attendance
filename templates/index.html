@@ -106,6 +106,9 @@
             <a href="#" data-view="scanner" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border/50 transition-colors">
                 <i class="fa-solid fa-camera-retro w-6"></i> Face Scanner
             </a>
+            <a href="#" data-view="network" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border/50 transition-colors">
+                <i class="fa-solid fa-network-wired w-6"></i> Network Sync
+            </a>
         </nav>
 
         <div class="p-4 border-t border-gray-200 dark:border-dark-border">
@@ -411,6 +414,104 @@
                             <div class="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm">
                                 <i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Waiting for scans...
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Network Sync View -->
+            <div id="view-network" class="view-section">
+                <h2 class="text-2xl font-bold mb-6">Network Synchronization Hub</h2>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Host/Coordinator Panel -->
+                    <div class="bg-white dark:bg-dark-card rounded-2xl shadow-sm border border-gray-100 dark:border-dark-border p-6 flex flex-col justify-between">
+                        <div>
+                            <div class="flex items-center justify-between mb-6">
+                                <div class="flex items-center gap-3">
+                                    <div class="p-3 bg-brand-50 dark:bg-brand-900/20 text-brand-500 rounded-xl">
+                                        <i class="fa-solid fa-tower-broadcast text-xl"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-lg">Coordinator (Host Node)</h3>
+                                        <p class="text-xs text-gray-400 dark:text-gray-500">Run this node as the network coordinator</p>
+                                    </div>
+                                </div>
+                                <span id="host-badge" class="px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500 dark:bg-dark-border dark:text-gray-400">Offline</span>
+                            </div>
+                            
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                                Starting the coordinator allows other Attendify stations on the same Wi-Fi or local network to automatically discover this PC and pair. Enrolled student updates and scan logs will automatically replicate.
+                            </p>
+
+                            <!-- Hosting Controls -->
+                            <div id="host-active-info" class="hidden space-y-4 mb-6 bg-brand-50/50 dark:bg-brand-900/10 p-5 rounded-xl border border-brand-100 dark:border-brand-900/20">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm text-gray-500 dark:text-gray-400">Host IP Address</span>
+                                    <span id="host-ip" class="font-mono text-sm font-bold text-gray-700 dark:text-gray-200">192.168.1.50</span>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm text-gray-500 dark:text-gray-400">Authentication PIN</span>
+                                    <span id="host-pin" class="font-mono text-xl font-extrabold text-brand-600 dark:text-brand-400 tracking-wider">------</span>
+                                </div>
+                                <div class="pt-3 border-t border-brand-100 dark:border-brand-900/20">
+                                    <span class="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">Connected Clients</span>
+                                    <ul id="connected-clients-list" class="space-y-1.5 text-xs text-gray-500 dark:text-gray-400">
+                                        <li>No clients paired yet</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button id="btn-toggle-hosting" class="w-full bg-brand-500 hover:bg-brand-600 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-brand-500/20">
+                            Start Hosting Sync
+                        </button>
+                    </div>
+
+                    <!-- Client Discovery Panel -->
+                    <div class="bg-white dark:bg-dark-card rounded-2xl shadow-sm border border-gray-100 dark:border-dark-border p-6 flex flex-col justify-between">
+                        <div>
+                            <div class="flex items-center justify-between mb-6">
+                                <div class="flex items-center gap-3">
+                                    <div class="p-3 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-500 rounded-xl">
+                                        <i class="fa-solid fa-magnifying-glass-location text-xl"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-lg">Discovery & Pairing</h3>
+                                        <p class="text-xs text-gray-400 dark:text-gray-500">Discover and sync with an active host</p>
+                                    </div>
+                                </div>
+                                <span id="client-badge" class="px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500 dark:bg-dark-border dark:text-gray-400">Standalone</span>
+                            </div>
+                            
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                                Search the local LAN to automatically discover the running coordinator. Enter the coordinator's generated PIN to authorize synchronization.
+                            </p>
+
+                            <!-- Discovered Hosts List -->
+                            <div class="mb-6">
+                                <div class="flex justify-between items-center mb-3">
+                                    <span class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Available Hosts</span>
+                                    <button id="btn-scan-hosts" class="text-xs text-brand-500 hover:text-brand-600 font-bold flex items-center gap-1">
+                                        <i class="fa-solid fa-arrows-rotate"></i> Scan LAN
+                                    </button>
+                                </div>
+                                
+                                <div id="hosts-container" class="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                                    <div class="text-center py-6 border border-dashed border-gray-200 dark:border-dark-border rounded-xl text-xs text-gray-400">
+                                        Click "Scan LAN" to discover coordinators
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Current Connection Details -->
+                        <div id="client-connection-info" class="hidden bg-indigo-50/50 dark:bg-indigo-900/10 p-4 rounded-xl border border-indigo-100 dark:border-indigo-900/20 text-xs text-gray-500 dark:text-gray-400 mb-4 flex items-center justify-between">
+                            <div>
+                                <span class="block font-semibold text-gray-700 dark:text-gray-300">Connected to coordinator</span>
+                                <span id="connected-host-url" class="font-mono text-[10px]">http://...</span>
+                            </div>
+                            <i class="fa-solid fa-circle-check text-green-500 text-lg"></i>
                         </div>
                     </div>
                 </div>
@@ -1724,6 +1825,152 @@ async function fetchDateStatus(dateStr) {
                 });
             }
             
+            // --- Network Sync Logic ---
+            let isHosting = false;
+            let hostPin = null;
+            let currentCoordinator = null;
+
+            function updateNetworkStatus() {
+                fetch('/api/network/status')
+                .then(r => r.json())
+                .then(data => {
+                    isHosting = data.is_hosting;
+                    hostPin = data.hosting_pin;
+                    currentCoordinator = data.coordinator_url;
+
+                    const hostBadge = document.getElementById('host-badge');
+                    const hostActiveInfo = document.getElementById('host-active-info');
+                    const hostIp = document.getElementById('host-ip');
+                    const hostPinEl = document.getElementById('host-pin');
+                    const toggleHostingBtn = document.getElementById('btn-toggle-hosting');
+                    const connectedList = document.getElementById('connected-clients-list');
+
+                    if (isHosting) {
+                        hostBadge.textContent = 'Hosting';
+                        hostBadge.className = 'px-2.5 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+                        hostActiveInfo.classList.remove('hidden');
+                        hostIp.textContent = data.local_ip;
+                        hostPinEl.textContent = hostPin;
+                        toggleHostingBtn.textContent = 'Stop Hosting Sync';
+                        toggleHostingBtn.className = 'w-full bg-red-500 hover:bg-red-600 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-red-500/20';
+                        
+                        if (data.connected_clients && data.connected_clients.length > 0) {
+                            connectedList.innerHTML = data.connected_clients.map(ip => `
+                                <li class="flex items-center gap-1.5 font-mono text-[10px]">
+                                    <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                                    Station IP: ${ip}
+                                </li>
+                            `).join('');
+                        } else {
+                            connectedList.innerHTML = '<li>No clients paired yet</li>';
+                        }
+                    } else {
+                        hostBadge.textContent = 'Offline';
+                        hostBadge.className = 'px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500 dark:bg-dark-border dark:text-gray-400';
+                        hostActiveInfo.classList.add('hidden');
+                        toggleHostingBtn.textContent = 'Start Hosting Sync';
+                        toggleHostingBtn.className = 'w-full bg-brand-500 hover:bg-brand-600 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-brand-500/20';
+                    }
+
+                    const clientBadge = document.getElementById('client-badge');
+                    const connectionInfo = document.getElementById('client-connection-info');
+                    const hostUrlEl = document.getElementById('connected-host-url');
+
+                    if (currentCoordinator) {
+                        clientBadge.textContent = 'Connected';
+                        clientBadge.className = 'px-2.5 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+                        connectionInfo.classList.remove('hidden');
+                        hostUrlEl.textContent = currentCoordinator;
+                    } else {
+                        clientBadge.textContent = 'Standalone';
+                        clientBadge.className = 'px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500 dark:bg-dark-border dark:text-gray-400';
+                        connectionInfo.classList.add('hidden');
+                    }
+                })
+                .catch(err => console.error("Error fetching network status:", err));
+            }
+
+            document.getElementById('btn-toggle-hosting').addEventListener('click', () => {
+                const action = isHosting ? 'stop' : 'start';
+                fetch('/api/network/host', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: action })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast('Hosting Update', data.message || 'Host state toggled.');
+                        updateNetworkStatus();
+                    } else {
+                        showToast('Hosting Error', data.error, 'error');
+                    }
+                })
+                .catch(err => showToast('Error', String(err), 'error'));
+            });
+
+            document.getElementById('btn-scan-hosts').addEventListener('click', () => {
+                const container = document.getElementById('hosts-container');
+                container.innerHTML = `
+                    <div class="text-center py-6 text-xs text-gray-400">
+                        <i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Scanning network...
+                    </div>
+                `;
+                fetch('/api/network/discover')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.hosts && data.hosts.length > 0) {
+                        container.innerHTML = data.hosts.map((h, i) => `
+                            <div class="border border-gray-200 dark:border-dark-border p-4 rounded-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-gray-50 dark:bg-dark-border/20 transition-all hover:border-brand-500/30">
+                                <div>
+                                    <h4 class="font-bold text-sm text-gray-700 dark:text-gray-200">${h.name}</h4>
+                                    <span class="text-xs text-gray-400 font-mono">${h.ip}</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <input type="text" maxlength="6" placeholder="PIN" id="pin-input-${i}" class="w-20 bg-white dark:bg-dark-bg border border-gray-300 dark:border-dark-border rounded-lg px-2 py-1 text-center font-extrabold text-sm outline-none focus:ring-1 focus:ring-brand-500 text-gray-700 dark:text-white">
+                                    <button onclick="connectToHost('${h.ip}', ${h.port}, 'pin-input-${i}')" class="bg-indigo-500 hover:bg-indigo-600 text-white text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors">Connect</button>
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        container.innerHTML = `
+                            <div class="text-center py-6 border border-dashed border-gray-200 dark:border-dark-border rounded-xl text-xs text-gray-400">
+                                No hosts discovered. Ensure hosts are active.
+                            </div>
+                        `;
+                    }
+                })
+                .catch(err => {
+                    container.innerHTML = `<div class="text-center py-6 text-xs text-red-500">Scan failed: ${err}</div>`;
+                });
+            });
+
+            window.connectToHost = function(ip, port, inputId) {
+                const pin = document.getElementById(inputId).value.trim();
+                if (!pin) {
+                    showToast('Validation Error', 'Enter the 6-digit PIN.', 'error');
+                    return;
+                }
+                fetch('/api/network/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: ip, port: port, pin: pin })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast('Connected', data.message);
+                        updateNetworkStatus();
+                    } else {
+                        showToast('Connection Refused', data.error, 'error');
+                    }
+                })
+                .catch(err => showToast('Error', String(err), 'error'));
+            };
+
+            updateNetworkStatus();
+            setInterval(updateNetworkStatus, 5000);
+
             // Fetch loop every 2 seconds for stats and recent scans (real-time updates)
             setInterval(updateStats, 2000);
             setInterval(fetchRecentList, 2000);

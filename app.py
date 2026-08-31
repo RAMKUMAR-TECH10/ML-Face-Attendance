@@ -40,12 +40,33 @@ heartbeat_lock = threading.Lock()
 camera_active = threading.Event()  # Set when camera is intentionally running
 known_encodings_lock = threading.Lock()
 
-# Load known students once
-students_data = db_manager.get_all_students()
-known_ids = [s['id'] for s in students_data]
-known_names = [s['name'] for s in students_data]
-known_encodings = [s['descriptor'] for s in students_data]
-print(f"[STARTUP] Loaded {len(known_encodings)} valid student encodings from database.")
+# Sync configuration
+coordinator_url = None
+node_id = str(uuid.uuid4())
+last_sync_event_id = 0
+is_hosting_sync = False
+hosting_pin = None
+connected_nodes = {}  # Map of node_id -> client_ip
+udp_server_socket = None
+
+known_ids = []
+known_names = []
+known_encodings = []
+
+def reload_known_encodings():
+    global known_ids, known_names, known_encodings
+    students_data = db_manager.get_all_students()
+    new_ids = [s['id'] for s in students_data]
+    new_names = [s['name'] for s in students_data]
+    new_encodings = [s['descriptor'] for s in students_data]
+    
+    with known_encodings_lock:
+        known_ids = new_ids
+        known_names = new_names
+        known_encodings = new_encodings
+    print(f"[SYNC] Reloaded {len(known_encodings)} valid student encodings from database.")
+
+reload_known_encodings()
 
 # Professional Status Codes
 STATUS_SUCCESS = "SUCCESS"
@@ -1171,6 +1192,378 @@ def api_set_calendar_status():
     return jsonify({'success': True, 'message': f'Set {date_str} as {status}'})
 
 
+@app.route('/api/sync/push', methods=['POST'])
+def api_sync_push():
+    events = request.json.get('events', [])
+    students_changed = False
+    for event in events:
+        event_type = event.get('event_type')
+        table_name = event.get('table_name')
+        record_uuid = event.get('record_uuid')
+        payload = event.get('payload', {})
+        
+        if table_name == 'students':
+            existing = db_manager.get_student_by_uuid(record_uuid)
+            if existing:
+                incoming_updated = payload.get('updated_at', '')
+                existing_updated = existing.get('updated_at', '')
+                if incoming_updated > existing_updated:
+                    db_manager.update_student_by_uuid(
+                        record_uuid, 
+                        payload, 
+                        faceDescriptor=payload.get('faceDescriptor'),
+                        updated_at=incoming_updated,
+                        is_deleted=payload.get('is_deleted', 0)
+                    )
+                    students_changed = True
+            else:
+                if payload.get('is_deleted', 0) == 0:
+                    faceDescriptor = payload.get('faceDescriptor')
+                    payload['uuid'] = record_uuid
+                    db_manager.add_student(
+                        payload, 
+                        faceDescriptor, 
+                        sync_mode=True
+                    )
+                    students_changed = True
+                        
+        elif table_name == 'attendance_log':
+            with db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM attendance_log WHERE uuid = ?", (record_uuid,))
+                exists = cursor.fetchone()
+                if not exists:
+                    db_manager.log_attendance(
+                        payload.get('student_name'),
+                        status=payload.get('status'),
+                        log_uuid=record_uuid,
+                        origin_node_id=payload.get('origin_node_id', 'remote'),
+                        timestamp_str=payload.get('timestamp'),
+                        sync_mode=True
+                    )
+                    
+        elif table_name == 'calendar_exceptions':
+            with db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT updated_at FROM calendar_exceptions WHERE uuid = ?", (record_uuid,))
+                row = cursor.fetchone()
+                
+            incoming_updated = payload.get('updated_at', '')
+            if not row:
+                db_manager.set_calendar_exception(
+                    payload.get('date'),
+                    payload.get('status'),
+                    exception_uuid=record_uuid,
+                    sync_mode=True
+                )
+            else:
+                existing_updated = row[0]
+                if incoming_updated > existing_updated:
+                    db_manager.set_calendar_exception(
+                        payload.get('date'),
+                        payload.get('status'),
+                        exception_uuid=record_uuid,
+                        sync_mode=True
+                    )
+                    
+    if students_changed:
+        reload_known_encodings()
+        
+    return jsonify({'success': True})
+
+
+@app.route('/api/sync/pull')
+def api_sync_pull():
+    last_id = request.args.get('last_id', 0, type=int)
+    events = db_manager.get_sync_events_since(last_id)
+    return jsonify({'events': events})
+
+
+def sync_worker_loop():
+    global coordinator_url, last_sync_event_id
+    import requests
+    print("[SYNC WORKER] Thread started.")
+    while True:
+        if coordinator_url:
+            try:
+                # 1. PUSH local sync queue events to coordinator
+                local_events = db_manager.get_sync_events_since(0)
+                if local_events:
+                    print(f"[SYNC WORKER] Pushing {len(local_events)} events to coordinator.")
+                    resp = requests.post(f"{coordinator_url}/api/sync/push", json={'events': local_events}, timeout=3)
+                    if resp.status_code == 200 and resp.json().get('success'):
+                        max_local_id = max(e['id'] for e in local_events)
+                        db_manager.clear_sync_events_up_to(max_local_id)
+                
+                # 2. PULL new events from coordinator
+                resp = requests.get(f"{coordinator_url}/api/sync/pull", params={'last_id': last_sync_event_id}, timeout=3)
+                if resp.status_code == 200:
+                    pulled_events = resp.json().get('events', [])
+                    if pulled_events:
+                        print(f"[SYNC WORKER] Pulled {len(pulled_events)} events from coordinator.")
+                        students_changed = False
+                        for event in pulled_events:
+                            event_type = event.get('event_type')
+                            table_name = event.get('table_name')
+                            record_uuid = event.get('record_uuid')
+                            payload = event.get('payload', {})
+                            
+                            if table_name == 'students':
+                                existing = db_manager.get_student_by_uuid(record_uuid)
+                                if existing:
+                                    incoming_updated = payload.get('updated_at', '')
+                                    existing_updated = existing.get('updated_at', '')
+                                    if incoming_updated > existing_updated:
+                                        db_manager.update_student_by_uuid(
+                                            record_uuid, 
+                                            payload, 
+                                            faceDescriptor=payload.get('faceDescriptor'),
+                                            updated_at=incoming_updated,
+                                            is_deleted=payload.get('is_deleted', 0)
+                                        )
+                                        students_changed = True
+                                else:
+                                    if payload.get('is_deleted', 0) == 0:
+                                        faceDescriptor = payload.get('faceDescriptor')
+                                        payload['uuid'] = record_uuid
+                                        db_manager.add_student(
+                                            payload, 
+                                            faceDescriptor, 
+                                            sync_mode=True
+                                        )
+                                        students_changed = True
+                                            
+                            elif table_name == 'attendance_log':
+                                with db_manager.get_connection() as conn:
+                                    cursor = conn.cursor()
+                                    cursor.execute("SELECT id FROM attendance_log WHERE uuid = ?", (record_uuid,))
+                                    exists = cursor.fetchone()
+                                    if not exists:
+                                        db_manager.log_attendance(
+                                            payload.get('student_name'),
+                                            status=payload.get('status'),
+                                            log_uuid=record_uuid,
+                                            origin_node_id=payload.get('origin_node_id', 'remote'),
+                                            timestamp_str=payload.get('timestamp'),
+                                            sync_mode=True
+                                        )
+                                        
+                            elif table_name == 'calendar_exceptions':
+                                with db_manager.get_connection() as conn:
+                                    cursor = conn.cursor()
+                                    cursor.execute("SELECT updated_at FROM calendar_exceptions WHERE uuid = ?", (record_uuid,))
+                                    row = cursor.fetchone()
+                                incoming_updated = payload.get('updated_at', '')
+                                if not row:
+                                    db_manager.set_calendar_exception(
+                                        payload.get('date'),
+                                        payload.get('status'),
+                                        exception_uuid=record_uuid,
+                                        sync_mode=True
+                                    )
+                                else:
+                                    existing_updated = row[0]
+                                    if incoming_updated > existing_updated:
+                                        db_manager.set_calendar_exception(
+                                            payload.get('date'),
+                                            payload.get('status'),
+                                            exception_uuid=record_uuid,
+                                            sync_mode=True
+                                        )
+                        
+                        if students_changed:
+                            reload_known_encodings()
+                            
+                        last_sync_event_id = max(e['id'] for e in pulled_events)
+            except Exception as e:
+                print(f"[SYNC WORKER ERROR] {e}")
+        time.sleep(5)
+
+
+def get_local_ip():
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = '127.0.0.1'
+    finally:
+        s.close()
+    return ip
+
+
+def udp_responder_loop():
+    global udp_server_socket, is_hosting_sync, hosting_pin
+    import socket
+    
+    udp_server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        udp_server_socket.bind(('', 5001))
+    except Exception as e:
+        print(f"[UDP SERVER ERROR] Failed to bind: {e}")
+        return
+        
+    print("[UDP SERVER] Started listening on port 5001.")
+    while is_hosting_sync:
+        try:
+            data, addr = udp_server_socket.recvfrom(1024)
+            if data == b"ATTENDIFY_DISCOVER":
+                local_ip = get_local_ip()
+                response = {
+                    'ip': local_ip,
+                    'port': 5000,
+                    'node_id': node_id,
+                    'name': f"Attendify Host ({local_ip})"
+                }
+                udp_server_socket.sendto(json.dumps(response).encode('utf-8'), addr)
+        except Exception as e:
+            if not is_hosting_sync:
+                break
+            print(f"[UDP SERVER ERROR] {e}")
+            
+    try:
+        udp_server_socket.close()
+    except:
+        pass
+    udp_server_socket = None
+    print("[UDP SERVER] Stopped.")
+
+
+@app.route('/api/network/host', methods=['POST'])
+def api_network_host():
+    global is_hosting_sync, hosting_pin, udp_server_socket
+    import random
+    data = request.json or {}
+    action = data.get('action')
+    
+    if action == 'start':
+        if is_hosting_sync:
+            return jsonify({'success': True, 'pin': hosting_pin, 'ip': get_local_ip()})
+        
+        hosting_pin = str(random.randint(100000, 999999))
+        is_hosting_sync = True
+        
+        responder_thread = threading.Thread(target=udp_responder_loop, daemon=True)
+        responder_thread.start()
+        
+        return jsonify({
+            'success': True, 
+            'pin': hosting_pin, 
+            'ip': get_local_ip(), 
+            'message': 'Sync hosting started successfully.'
+        })
+    elif action == 'stop':
+        is_hosting_sync = False
+        hosting_pin = None
+        if udp_server_socket:
+            try:
+                udp_server_socket.close()
+            except:
+                pass
+        return jsonify({'success': True, 'message': 'Sync hosting stopped.'})
+        
+    return jsonify({'error': 'Invalid action'}), 400
+
+
+@app.route('/api/network/discover')
+def api_network_discover():
+    import socket
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    client_socket.settimeout(1.0)
+    
+    hosts = []
+    try:
+        client_socket.sendto(b"ATTENDIFY_DISCOVER", ('255.255.255.255', 5001))
+        start_time = time.time()
+        while time.time() - start_time < 1.0:
+            try:
+                data, addr = client_socket.recvfrom(1024)
+                try:
+                    info = json.loads(data.decode('utf-8'))
+                    if info.get('node_id') != node_id:
+                        if info not in hosts:
+                            hosts.append(info)
+                except:
+                    pass
+            except socket.timeout:
+                break
+    except Exception as e:
+        print(f"[DISCOVERY ERROR] {e}")
+    finally:
+        client_socket.close()
+        
+    return jsonify({'hosts': hosts})
+
+
+@app.route('/api/network/connect', methods=['POST'])
+def api_network_connect():
+    global coordinator_url
+    data = request.json or {}
+    ip = data.get('ip')
+    port = data.get('port', 5000)
+    pin = data.get('pin')
+    
+    if not ip or not pin:
+        return jsonify({'error': 'Missing IP or PIN'}), 400
+        
+    import requests
+    try:
+        handshake_url = f"http://{ip}:{port}/api/network/handshake"
+        resp = requests.post(handshake_url, json={
+            'node_id': node_id,
+            'client_ip': get_local_ip(),
+            'pin': pin
+        }, timeout=3)
+        
+        if resp.status_code == 200 and resp.json().get('success'):
+            coordinator_url = f"http://{ip}:{port}"
+            print(f"[SYNC CLIENT] Connected to coordinator {coordinator_url}")
+            return jsonify({'success': True, 'message': f'Connected to coordinator at {ip}'})
+        else:
+            error_msg = resp.json().get('error', 'Handshake rejected')
+            return jsonify({'error': error_msg}), 400
+    except Exception as e:
+        return jsonify({'error': f'Failed to connect: {str(e)}'}), 500
+
+
+@app.route('/api/network/handshake', methods=['POST'])
+def api_network_handshake():
+    global hosting_pin, connected_nodes
+    data = request.json or {}
+    client_node_id = data.get('node_id')
+    client_ip = data.get('client_ip')
+    pin = data.get('pin')
+    
+    if not client_node_id or not client_ip or not pin:
+        return jsonify({'error': 'Missing parameters'}), 400
+        
+    if not is_hosting_sync or hosting_pin is None:
+        return jsonify({'error': 'Node is not hosting synchronization'}), 400
+        
+    if str(pin) != str(hosting_pin):
+        return jsonify({'error': 'Invalid PIN passcode'}), 401
+        
+    connected_nodes[client_node_id] = client_ip
+    print(f"[SYNC HOST] Client {client_node_id} at {client_ip} registered successfully.")
+    return jsonify({'success': True})
+
+
+@app.route('/api/network/status')
+def api_network_status():
+    local_ip = get_local_ip()
+    return jsonify({
+        'node_id': node_id,
+        'local_ip': local_ip,
+        'coordinator_url': coordinator_url,
+        'is_hosting': is_hosting_sync,
+        'hosting_pin': hosting_pin,
+        'connected_clients': list(connected_nodes.values()) if is_hosting_sync else []
+    })
+
+
 def cleanup():
     """Only release camera on full system shutdown."""
     print("Releasing camera...")
@@ -1184,4 +1577,8 @@ def cleanup():
 atexit.register(cleanup)
 
 if __name__ == '__main__':
+    # Start the synchronization worker daemon thread
+    sync_thread = threading.Thread(target=sync_worker_loop, daemon=True)
+    sync_thread.start()
+    
     app.run(debug=True, port=5000, threaded=True)
