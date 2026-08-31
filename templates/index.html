@@ -255,7 +255,12 @@
                                     <th class="px-6 py-4 border-b border-gray-100 dark:border-dark-border">Name</th>
                                     <th class="px-6 py-4 border-b border-gray-100 dark:border-dark-border">Dept</th>
                                     <th class="px-6 py-4 border-b border-gray-100 dark:border-dark-border text-center">Year</th>
-                                    <th class="px-6 py-4 border-b border-gray-100 dark:border-dark-border text-center">Today's Status</th>
+                                    <th id="th-status" class="px-6 py-4 border-b border-gray-100 dark:border-dark-border text-center cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-dark-border/50 transition-colors">
+                                        <div class="flex items-center justify-center gap-1">
+                                            <span>Today's Status</span>
+                                            <span id="status-sort-icon" class="text-gray-400"><i class="fa-solid fa-sort"></i></span>
+                                        </div>
+                                    </th>
                                     <th class="px-6 py-4 border-b border-gray-100 dark:border-dark-border text-right">Actions</th>
                                 </tr>
                             </thead>
@@ -569,6 +574,7 @@
         let selectedYear = '';
         let currentStudents = [];
         let rollNoSortDirection = null; // 'asc', 'desc', or null
+        let statusSortState = null; // null, 'Present', 'Absent', 'Late'
         const htmlEl = document.documentElement;
 
         // Auto-check local storage
@@ -906,6 +912,31 @@
                     const valB = String(b.rollno || '').trim();
                     const comparison = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
                     return rollNoSortDirection === 'asc' ? comparison : -comparison;
+                });
+            } else if (statusSortState) {
+                const getStatusPriority = (status) => {
+                    const isPresent = (status === 'Present' || status === 'ALREADY RECORDED');
+                    if (statusSortState === 'Present') {
+                        if (isPresent) return 1;
+                        if (status === 'Late') return 2;
+                        if (status === 'Absent') return 3;
+                        return 4;
+                    } else if (statusSortState === 'Absent') {
+                        if (status === 'Absent') return 1;
+                        if (isPresent) return 2;
+                        if (status === 'Late') return 3;
+                        return 4;
+                    } else if (statusSortState === 'Late') {
+                        if (status === 'Late') return 1;
+                        if (isPresent) return 2;
+                        if (status === 'Absent') return 3;
+                        return 4;
+                    }
+                    return 4;
+                };
+
+                sortedStudents.sort((a, b) => {
+                    return getStatusPriority(a.today_status) - getStatusPriority(b.today_status);
                 });
             }
 
@@ -1261,14 +1292,48 @@ async function fetchDateStatus(dateStr) {
             // Roll Number sorting click handler
             const thRollNo = document.getElementById('th-rollno');
             const rollNoSortIcon = document.getElementById('rollno-sort-icon');
+            const thStatus = document.getElementById('th-status');
+            const statusSortIcon = document.getElementById('status-sort-icon');
+
             if (thRollNo) {
                 thRollNo.addEventListener('click', () => {
+                    // Reset status sort
+                    statusSortState = null;
+                    if (statusSortIcon) {
+                        statusSortIcon.innerHTML = '<i class="fa-solid fa-sort"></i>';
+                    }
+
                     if (rollNoSortDirection === 'asc') {
                         rollNoSortDirection = 'desc';
                         rollNoSortIcon.innerHTML = '<i class="fa-solid fa-sort-down text-brand-500"></i>';
                     } else {
                         rollNoSortDirection = 'asc';
                         rollNoSortIcon.innerHTML = '<i class="fa-solid fa-sort-up text-brand-500"></i>';
+                    }
+                    renderCachedStudents();
+                });
+            }
+
+            if (thStatus) {
+                thStatus.addEventListener('click', () => {
+                    // Reset roll number sort
+                    rollNoSortDirection = null;
+                    if (rollNoSortIcon) {
+                        rollNoSortIcon.innerHTML = '<i class="fa-solid fa-sort"></i>';
+                    }
+
+                    if (statusSortState === null) {
+                        statusSortState = 'Present';
+                        statusSortIcon.innerHTML = '<i class="fa-solid fa-circle-check text-green-500"></i>';
+                    } else if (statusSortState === 'Present') {
+                        statusSortState = 'Absent';
+                        statusSortIcon.innerHTML = '<i class="fa-solid fa-circle-xmark text-red-500"></i>';
+                    } else if (statusSortState === 'Absent') {
+                        statusSortState = 'Late';
+                        statusSortIcon.innerHTML = '<i class="fa-solid fa-clock text-yellow-500"></i>';
+                    } else {
+                        statusSortState = null;
+                        statusSortIcon.innerHTML = '<i class="fa-solid fa-sort"></i>';
                     }
                     renderCachedStudents();
                 });
