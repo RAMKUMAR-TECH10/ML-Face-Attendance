@@ -14,6 +14,12 @@ class DatabaseManager:
     def get_connection(self):
         return sqlite3.connect(self.db_path)
 
+    def _log_sync_event(self, cursor, event_type, table_name, record_uuid, payload_dict):
+        cursor.execute('''
+            INSERT INTO sync_queue (event_type, table_name, record_uuid, payload) 
+            VALUES (?, ?, ?, ?)
+        ''', (event_type, table_name, record_uuid, json.dumps(payload_dict)))
+
     def init_db(self):
         import uuid
         with self.get_connection() as conn:
@@ -145,6 +151,7 @@ class DatabaseManager:
             rollno = str(student_data.get('rollno') or '')
             contact = str(student_data.get('contact') or '')
             student_uuid = student_data.get('uuid') or str(uuid.uuid4())
+            updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute('''
                 INSERT INTO students (name, rollno, dept, year, email, contact, faceDescriptor, uuid, updated_at, is_deleted) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
@@ -157,8 +164,22 @@ class DatabaseManager:
                 contact,
                 faceDescriptor,
                 student_uuid,
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                updated_at
             ))
+            
+            # Log sync event
+            self._log_sync_event(cursor, 'INSERT', 'students', student_uuid, {
+                'name': student_data.get('name'),
+                'rollno': rollno,
+                'dept': student_data.get('dept'),
+                'year': student_data.get('year'),
+                'email': student_data.get('email'),
+                'contact': contact,
+                'faceDescriptor': faceDescriptor,
+                'updated_at': updated_at,
+                'is_deleted': 0
+            })
+            
             conn.commit()
             return cursor.lastrowid
 
@@ -167,9 +188,17 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
+            # Fetch UUID and existing descriptor first
+            cursor.execute("SELECT uuid, faceDescriptor FROM students WHERE id = ?", (student_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False
+            student_uuid, existing_descriptor = row
+            
             # Update core fields — cast rollno/contact to strings
             rollno = str(student_data.get('rollno') or '')
             contact = str(student_data.get('contact') or '')
+            updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute('''
                 UPDATE students 
                 SET name = ?, rollno = ?, dept = ?, year = ?, email = ?, contact = ?, updated_at = ?
@@ -181,10 +210,11 @@ class DatabaseManager:
                 student_data.get('year'),
                 student_data.get('email'),
                 contact,
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                updated_at,
                 student_id
             ))
             
+            final_descriptor = existing_descriptor
             # Update descriptor if provided — use .tolist() for clean serialization
             if faceDescriptor is not None:
                 if isinstance(faceDescriptor, np.ndarray):
@@ -193,9 +223,23 @@ class DatabaseManager:
                     faceDescriptor = json.dumps(faceDescriptor)
                 cursor.execute("UPDATE students SET faceDescriptor = ? , updated_at = ? WHERE id = ?", (
                     faceDescriptor, 
-                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 
+                    updated_at, 
                     student_id
                 ))
+                final_descriptor = faceDescriptor
+            
+            # Log sync event
+            self._log_sync_event(cursor, 'UPDATE', 'students', student_uuid, {
+                'name': student_data.get('name'),
+                'rollno': rollno,
+                'dept': student_data.get('dept'),
+                'year': student_data.get('year'),
+                'email': student_data.get('email'),
+                'contact': contact,
+                'faceDescriptor': final_descriptor,
+                'updated_at': updated_at,
+                'is_deleted': 0
+            })
             
             conn.commit()
             return cursor.rowcount > 0

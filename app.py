@@ -38,6 +38,7 @@ reg_face_status_lock = threading.Lock()
 last_heartbeat = time.time()
 heartbeat_lock = threading.Lock()
 camera_active = threading.Event()  # Set when camera is intentionally running
+known_encodings_lock = threading.Lock()
 
 # Load known students once
 students_data = db_manager.get_all_students()
@@ -132,11 +133,15 @@ def ai_brain_worker():
                 face_encodings = engine.get_encodings(small_frame, face_locations)
                 if face_encodings:
                     face_encoding = face_encodings[0]
-                    index, distance = engine.compare_faces(known_encodings, face_encoding)
+                    with known_encodings_lock:
+                        local_encodings = list(known_encodings)
+                        local_names = list(known_names)
+                        
+                    index, distance = engine.compare_faces(local_encodings, face_encoding)
 
                     with live_status_lock:
                         if index is not None:
-                            name = known_names[index]
+                            name = local_names[index]
                             success, status, last_seen_str = attendance_mgr.mark_attendance(name)
                             
                             # Extract just HH:MM:SS from the last_seen_str (which is YYYY-MM-DD HH:MM:SS)
@@ -357,11 +362,15 @@ def api_process_frame():
             face_encodings = engine.get_encodings(small_frame, face_locations)
             if face_encodings:
                 face_encoding = face_encodings[0]
-                index, distance = engine.compare_faces(known_encodings, face_encoding)
+                with known_encodings_lock:
+                    local_encodings = list(known_encodings)
+                    local_names = list(known_names)
+                    
+                index, distance = engine.compare_faces(local_encodings, face_encoding)
                 
                 with live_status_lock:
                     if index is not None:
-                        name = known_names[index]
+                        name = local_names[index]
                         success, status, last_seen_str = attendance_mgr.mark_attendance(name)
                         
                         try:
@@ -878,19 +887,24 @@ def api_add_student():
             return jsonify({'error': 'Duplicate Contact: This email or phone number is already registered.'}), 400
             
         # 2. Biometric Anti-Duplicate Check
-        if known_encodings:
-            index, distance = engine.compare_faces(known_encodings, encoding, threshold=0.6)
+        with known_encodings_lock:
+            local_encodings = list(known_encodings)
+            local_names = list(known_names)
+            
+        if local_encodings:
+            index, distance = engine.compare_faces(local_encodings, encoding, threshold=0.6)
             if index is not None:
-                existing_name = known_names[index]
+                existing_name = local_names[index]
                 return jsonify({'error': f'Biometric Match Found: You are already registered as {existing_name}.'}), 400
         
         # Save to DB
         student_id = db_manager.add_student(data, encoding)
         
         # Update in-memory ML lists so recognition works without restart
-        known_ids.append(student_id)
-        known_names.append(student_name)
-        known_encodings.append(encoding)
+        with known_encodings_lock:
+            known_ids.append(student_id)
+            known_names.append(student_name)
+            known_encodings.append(encoding)
         
         return jsonify({'success': True, 'message': f'Added student {student_name}'})
     except Exception as e:
@@ -959,19 +973,24 @@ def api_upload_student():
             return jsonify({'error': 'Duplicate Contact: This email or phone number is already registered.'}), 400
             
         # 2. Biometric Anti-Duplicate Check
-        if known_encodings:
-            index, distance = engine.compare_faces(known_encodings, encoding, threshold=0.6)
+        with known_encodings_lock:
+            local_encodings = list(known_encodings)
+            local_names = list(known_names)
+            
+        if local_encodings:
+            index, distance = engine.compare_faces(local_encodings, encoding, threshold=0.6)
             if index is not None:
-                existing_name = known_names[index]
+                existing_name = local_names[index]
                 return jsonify({'error': f'Biometric Match Found: You are already registered as {existing_name}.'}), 400
         
         # Save to DB as JSON-string (handled by DatabaseManager.add_student)
         student_id = db_manager.add_student(student_data, encoding)
         
         # Update in-memory lists
-        known_ids.append(student_id)
-        known_names.append(student_name)
-        known_encodings.append(encoding)
+        with known_encodings_lock:
+            known_ids.append(student_id)
+            known_names.append(student_name)
+            known_encodings.append(encoding)
         
         return jsonify({'success': True, 'message': f'Student {student_name} enrolled via CNN.'})
     except Exception as e:
@@ -1065,11 +1084,12 @@ def api_delete_student(student_id):
     success = db_manager.delete_student(student_id)
     if success:
         # Update in-memory lists
-        if student_id in known_ids:
-            idx = known_ids.index(student_id)
-            known_ids.pop(idx)
-            known_names.pop(idx)
-            known_encodings.pop(idx)
+        with known_encodings_lock:
+            if student_id in known_ids:
+                idx = known_ids.index(student_id)
+                known_ids.pop(idx)
+                known_names.pop(idx)
+                known_encodings.pop(idx)
         return jsonify({'success': True})
     return jsonify({'error': 'Student not found'}), 404
 
@@ -1108,12 +1128,13 @@ def api_update_student(student_id):
     success = db_manager.update_student(student_id, student_data, face_encoding)
     if success:
         # Update in-memory lists if name or encoding changed
-        if student_id in known_ids:
-            idx = known_ids.index(student_id)
-            if 'name' in student_data and student_data['name']:
-                known_names[idx] = student_data['name']
-            if face_encoding is not None:
-                known_encodings[idx] = face_encoding
+        with known_encodings_lock:
+            if student_id in known_ids:
+                idx = known_ids.index(student_id)
+                if 'name' in student_data and student_data['name']:
+                    known_names[idx] = student_data['name']
+                if face_encoding is not None:
+                    known_encodings[idx] = face_encoding
         return jsonify({'success': True, 'message': 'Student updated successfully'})
     return jsonify({'error': 'Failed to update student'}), 500
 
