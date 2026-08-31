@@ -431,6 +431,10 @@
                             <p class="text-xs text-gray-400 dark:text-gray-500">Keep records updated across all devices in real time</p>
                         </div>
                         <div class="flex items-center gap-3">
+                            <button id="btn-initial-sync" class="hidden bg-brand-500 hover:bg-brand-600 text-white font-medium px-5 py-2.5 rounded-xl transition-all shadow-md shadow-brand-500/20 text-sm flex items-center gap-2" title="Pull all student data (name, roll no, face embeddings) from coordinator on first connection">
+                                <i class="fa-solid fa-download"></i>
+                                <span>Import All Data</span>
+                            </button>
                             <button id="btn-sync-now" class="bg-indigo-500 hover:bg-indigo-600 text-white font-medium px-5 py-2.5 rounded-xl transition-all shadow-md shadow-indigo-500/20 text-sm flex items-center gap-2">
                                 <i id="sync-icon" class="fa-solid fa-arrows-rotate"></i>
                                 <span>Sync Now</span>
@@ -536,7 +540,12 @@
                                 <span class="block font-semibold text-gray-700 dark:text-gray-300">Connected to coordinator</span>
                                 <span id="connected-host-url" class="font-mono text-[10px]">http://...</span>
                             </div>
-                            <i class="fa-solid fa-circle-check text-green-500 text-lg"></i>
+                            <div class="flex items-center gap-3">
+                                <button id="btn-forget-device" class="hidden text-[10px] font-semibold bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 px-2.5 py-1 rounded-lg transition-colors" title="Stop auto-connecting to this coordinator on startup">
+                                    <i class="fa-solid fa-ban mr-1"></i>Forget Device
+                                </button>
+                                <i class="fa-solid fa-circle-check text-green-500 text-lg"></i>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1922,10 +1931,33 @@ async function fetchDateStatus(dateStr) {
                         clientBadge.className = 'px-2.5 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
                         connectionInfo.classList.remove('hidden');
                         hostUrlEl.textContent = currentCoordinator;
+                        if (document.getElementById('btn-forget-device')) {
+                            document.getElementById('btn-forget-device').classList.remove('hidden');
+                        }
+                        if (document.getElementById('btn-initial-sync')) {
+                            document.getElementById('btn-initial-sync').classList.remove('hidden');
+                        }
+                    } else if (data.has_saved_connection) {
+                        clientBadge.textContent = 'Remembered (Reconnecting...)';
+                        clientBadge.className = 'px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400';
+                        connectionInfo.classList.remove('hidden');
+                        hostUrlEl.textContent = data.saved_coordinator || 'Saved device';
+                        if (document.getElementById('btn-forget-device')) {
+                            document.getElementById('btn-forget-device').classList.remove('hidden');
+                        }
+                        if (document.getElementById('btn-initial-sync')) {
+                            document.getElementById('btn-initial-sync').classList.add('hidden');
+                        }
                     } else {
                         clientBadge.textContent = 'Standalone';
                         clientBadge.className = 'px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500 dark:bg-dark-border dark:text-gray-400';
                         connectionInfo.classList.add('hidden');
+                        if (document.getElementById('btn-forget-device')) {
+                            document.getElementById('btn-forget-device').classList.add('hidden');
+                        }
+                        if (document.getElementById('btn-initial-sync')) {
+                            document.getElementById('btn-initial-sync').classList.add('hidden');
+                        }
                     }
 
                     // Update pending progress bar
@@ -1981,6 +2013,41 @@ async function fetchDateStatus(dateStr) {
                     icon.classList.remove('fa-spin');
                     showToast('Sync Error', String(err), 'error');
                 });
+            });
+
+            document.getElementById('btn-initial-sync').addEventListener('click', () => {
+                const btn = document.getElementById('btn-initial-sync');
+                btn.disabled = true;
+                fetch('/api/sync/initial_pull', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    btn.disabled = false;
+                    if (data.success) {
+                        showToast('Initial Sync Complete', data.message);
+                        updateNetworkStatus();
+                        loadStudents();
+                        updateStats();
+                        fetchRecentList();
+                    } else {
+                        showToast('Initial Sync Failed', data.error, 'error');
+                    }
+                })
+                .catch(err => {
+                    btn.disabled = false;
+                    showToast('Error', String(err), 'error');
+                });
+            });
+
+            document.getElementById('btn-forget-device').addEventListener('click', () => {
+                fetch('/api/network/disconnect', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast('Device Forgotten', data.message);
+                        updateNetworkStatus();
+                    }
+                })
+                .catch(err => showToast('Error', String(err), 'error'));
             });
 
             function fetchConflicts() {

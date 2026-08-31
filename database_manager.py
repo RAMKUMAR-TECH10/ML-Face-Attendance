@@ -162,7 +162,7 @@ class DatabaseManager:
             rollno = str(student_data.get('rollno') or '')
             contact = str(student_data.get('contact') or '')
             student_uuid = student_data.get('uuid') or str(uuid.uuid4())
-            updated_at = student_data.get('updated_at') if (sync_mode and student_data.get('updated_at')) else datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            updated_at = student_data.get('updated_at') or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute('''
                 INSERT INTO students (name, rollno, dept, year, email, contact, faceDescriptor, uuid, updated_at, is_deleted) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
@@ -209,7 +209,7 @@ class DatabaseManager:
             
             rollno = str(student_data.get('rollno') or '')
             contact = str(student_data.get('contact') or '')
-            updated_at = student_data.get('updated_at') if student_data.get('updated_at') else datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            updated_at = student_data.get('updated_at') or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute('''
                 UPDATE students 
                 SET name = ?, rollno = ?, dept = ?, year = ?, email = ?, contact = ?, updated_at = ?
@@ -402,7 +402,7 @@ class DatabaseManager:
         if not log_uuid:
             log_uuid = str(uuid.uuid4())
         if not timestamp_str:
-            timestamp_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -437,7 +437,7 @@ class DatabaseManager:
                 return False
             student_uuid = row[0]
             
-            updated_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute('''
                 UPDATE students 
                 SET is_deleted = 1, updated_at = ? 
@@ -468,12 +468,13 @@ class DatabaseManager:
                 default_status = "Working"
                 return (default_status, True) if return_default else default_status
 
-    def set_calendar_exception(self, date_str, status, exception_uuid=None, sync_mode=False):
+    def set_calendar_exception(self, date_str, status, exception_uuid=None, sync_mode=False, updated_at=None):
         import uuid
         from datetime import datetime
         if not exception_uuid:
             exception_uuid = str(uuid.uuid4())
-        updated_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        if not updated_at:
+            updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -514,7 +515,7 @@ class DatabaseManager:
     def update_student_by_uuid(self, student_uuid, student_data, faceDescriptor=None, updated_at=None, is_deleted=0, sync_mode=False):
         from datetime import datetime
         if not updated_at:
-            updated_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with self.get_connection() as conn:
             cursor = conn.cursor()
             if is_deleted == 1 or student_data.get('is_deleted', 0) == 1:

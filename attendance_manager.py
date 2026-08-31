@@ -12,12 +12,9 @@ class AttendanceManager:
         
         if last_time_str:
             try:
-                # Convert UTC stored timestamp to local time for correct calendar checking
-                last_time_utc = datetime.strptime(last_time_str, '%Y-%m-%d %H:%M:%S')
-                local_offset = datetime.now() - datetime.utcnow()
-                last_time_local = last_time_utc + local_offset
+                last_time = datetime.strptime(last_time_str, '%Y-%m-%d %H:%M:%S')
                 
-                if last_time_local.strftime('%Y-%m-%d') == today_date_str:
+                if last_time.strftime('%Y-%m-%d') == today_date_str:
                     return False, "ALREADY RECORDED", last_time_str
             except Exception:
                 # Fallback to cooldown check if timestamp parsing fails
@@ -31,10 +28,10 @@ class AttendanceManager:
         status = 'Late' if now > today_9_15am else 'Present'
         
         try:
-            # Save UTC string in database
-            timestamp_utc_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-            self.db_manager.log_attendance(student_name, status=status, timestamp_str=timestamp_utc_str)
-            return True, "SUCCESS", timestamp_utc_str
+            # Save local timestamp in database
+            timestamp_local_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            self.db_manager.log_attendance(student_name, status=status, timestamp_str=timestamp_local_str)
+            return True, "SUCCESS", timestamp_local_str
         except Exception as e:
             return False, "ERROR", str(e)
 
