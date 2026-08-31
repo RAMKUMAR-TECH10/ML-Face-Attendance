@@ -429,7 +429,7 @@
             <div class="grid grid-cols-2 gap-4 mb-4">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Department</label>
-                    <input type="text" id="input-student-dept" class="w-full bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-brand-500 outline-none text-gray-700 dark:text-white" value="Information Technology">
+                    <input type="text" id="input-student-dept" class="w-full bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-500 dark:text-gray-400 cursor-not-allowed" value="Information Technology" readonly>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Year</label>
@@ -1288,7 +1288,7 @@ async function fetchDateStatus(dateStr) {
                 document.getElementById('modal-title').innerText = 'Add New Student';
                 document.getElementById('input-student-name').value = '';
                 document.getElementById('input-student-roll').value = '';
-                document.getElementById('input-student-dept').value = '';
+                document.getElementById('input-student-dept').value = 'Information Technology';
                 document.getElementById('input-student-year').value = '1st';
                 document.getElementById('input-student-email').value = '';
                 document.getElementById('input-student-image').value = '';
@@ -1525,7 +1525,7 @@ async function fetchDateStatus(dateStr) {
                         document.getElementById('modal-title').innerText = 'Edit Student Details';
                         document.getElementById('input-student-name').value = s.name;
                         document.getElementById('input-student-roll').value = s.rollno || '';
-                        document.getElementById('input-student-dept').value = s.dept || '';
+                        document.getElementById('input-student-dept').value = 'Information Technology';
                         document.getElementById('input-student-year').value = s.year || '1st';
                         document.getElementById('input-student-email').value = s.email || s.contact || '';
                         

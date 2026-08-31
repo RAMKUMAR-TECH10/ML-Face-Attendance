@@ -945,7 +945,7 @@ def api_upload_student():
         student_data = {
             'name': student_name,
             'rollno': str(request.form.get('rollno') or ''),
-            'dept': request.form.get('dept'),
+            'dept': 'Information Technology',
             'year': request.form.get('year'),
             'email': request.form.get('email'),
             'contact': str(request.form.get('contact') or '')
@@ -1082,7 +1082,7 @@ def api_update_student(student_id):
         student_data = {
             'name': request.form.get('name'),
             'rollno': request.form.get('rollno'),
-            'dept': request.form.get('dept'),
+            'dept': 'Information Technology',
             'year': request.form.get('year'),
             'email': request.form.get('email'),
             'contact': request.form.get('contact')

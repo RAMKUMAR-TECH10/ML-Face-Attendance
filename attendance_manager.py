@@ -16,9 +16,9 @@ class AttendanceManager:
                 # print(f"Cooldown active for {student_name}. Skipping.")
                 return False, "ALREADY RECORDED", last_time_str
         
-        # Determine status: Late if after 9:00 AM
-        today_9am = now.replace(hour=9, minute=0, second=0, microsecond=0)
-        status = 'Late' if now > today_9am else 'Present'
+        # Determine status: Late if after 9:15 AM
+        today_9_15am = now.replace(hour=9, minute=15, second=0, microsecond=0)
+        status = 'Late' if now > today_9_15am else 'Present'
         
         try:
             self.db_manager.log_attendance(student_name, status=status)
